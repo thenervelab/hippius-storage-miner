@@ -1,0 +1,32 @@
+---
+# Task file specifically for updating the Hippius binary
+
+- name: Stop Hippius service before update
+  systemd:
+    name: hippius
+    state: stopped
+  become: yes
+
+- name: Download updated Hippius binary
+  get_url:
+    url: "{{ hippius_binary_url }}"
+    dest: "{{ hippius_binary_path }}/{{ hippius_binary_name }}"
+    mode: '0755'
+    owner: root
+    group: root
+    force: yes
+  become: yes
+
+- name: Ensure binary is executable
+  file:
+    path: "{{ hippius_binary_path }}/{{ hippius_binary_name }}"
+    mode: '0755'
+    owner: root
+    group: root
+  become: yes
+
+- name: Start Hippius service after update
+  systemd:
+    name: hippius
+    state: started
+  become: yes 

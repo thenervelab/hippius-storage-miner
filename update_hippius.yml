@@ -1,0 +1,12 @@
+---
+- name: Update Hippius Binary Only
+  hosts: ipfs_nodes
+  become: yes
+
+  tasks:
+    - name: Include hippius variables
+      include_vars:
+        file: "group_vars/all.yml"
+
+    - name: Update Hippius binary
+      include_tasks: roles/hippius/tasks/update_binary.yml 
