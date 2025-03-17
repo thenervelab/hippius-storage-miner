@@ -5,10 +5,8 @@ docker_repo_url: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ a
 kubo_download_base_url: "https://dist.ipfs.tech/kubo"
 
 # Hippius configuration
-hippius_binary_url: "http://141.94.106.80/hippius"  # Direct binary URL
+hippius_binary_url: "https://download.hippius.com/hippius"  # Direct binary URL
 hippius_binary_name: "hippius"
-hippius_chain_spec_url: "http://141.94.106.80/premain.json"  # Chain spec URL
-hippius_chain_spec_file: "{{ hippius_home }}/premain.json"  # Local path for downloaded chain spec
 hippius_home: /opt/hippius
 hippius_data_dir: "{{ hippius_home }}/data"
 hippius_binary_path: "{{ hippius_home }}/bin"
@@ -18,51 +16,33 @@ hippius_ports:
   rpc: 9944
   p2p: 30333
   ws: 9933
-hippius_node_name: "hippius-validator"  # Default node name using hostname
-hippius_telemetry_url: "wss://telemetry.hippius.com/submit/ 0"  # Telemetry endpoint with verbosity level 0
+hippius_node_name: "hippius-storage-miner"  # Default node name using hostname
+hippius_telemetry_url: "wss://telemetry.polkadot.io/submit/ 0"  # Telemetry endpoint with verbosity level 0
 
 # IPFS configuration
-ipfs_version: "v0.26.0"
+ipfs_version: "v0.33.2"
 ipfs_user: ipfs
 ipfs_group: ipfs
-ipfs_home: /home/ipfs
-ipfs_data_dir: "{{ ipfs_home }}/.ipfs"
+ipfs_home: /zfs/ipfs
+ipfs_data_dir: "{{ ipfs_home }}/data"
 ipfs_download_url: "{{ kubo_download_base_url }}/{{ ipfs_version }}/kubo_{{ ipfs_version }}_linux-amd64.tar.gz"
 ipfs_api_address: "/ip4/127.0.0.1/tcp/5001"
 ipfs_gateway_address: "/ip4/127.0.0.1/tcp/8080"
 
+# ZFS configuration for IPFS
+# The user will need to provide a list of available disks during playbook execution
+# For example: ansible-playbook site.yml -e "zfs_disks=['sdb','sdc']"
+# Leave empty to use a regular directory instead of ZFS
+# zfs_disks: ['sdb','sdc', 'sdd','sde']  # Default to empty list, which disables ZFS setup ['sdb','sdc']
+zfs_disks: ['sdb','sdc', 'sdd','sde']
 # Service configuration
 service_restart_delay: 10
 service_nofile_limit: 65536
 
-# Subtensor configuration
-subtensor_image: "ghcr.io/opentensor/subtensor:latest"
-subtensor_ports:
-  rpc: 9945
-  p2p: 30334
-  ws: 9934
-subtensor_volume_path: /tmp/blockchain
-subtensor_bootnode: "/dns/bootnode.finney.chain.opentensor.ai/tcp/30333/ws/p2p/12D3KooWRwbMb85RWnT8DSXSYMWQtuDwh4LJzndoRrTDotTR5gDC"
-subtensor_chain_spec: "raw_spec_finney.json"
-subtensor_container_name: "subtensor-mainnet-lite"
-subtensor_volume_name: "mainnet-lite-volume"
-subtensor_cpu_count: 4
-subtensor_mem_limit: "40000000000"
-subtensor_memswap_limit: "80000000000"
-subtensor_peer_count: 100
 
 # Firewall configuration
 ufw_allowed_ports:
   - port: 22
-    proto: tcp
-  # Subtensor ports
-  - port: "{{ subtensor_ports.p2p }}"
-    proto: tcp
-  - port: "{{ subtensor_ports.p2p }}"
-    proto: udp
-  - port: "{{ subtensor_ports.rpc }}"
-    proto: tcp
-  - port: "{{ subtensor_ports.ws }}"
     proto: tcp
   # Hippius ports
   - port: "{{ hippius_ports.p2p }}"
@@ -93,6 +73,7 @@ system_packages:
   - ca-certificates
   - software-properties-common
   - docker-compose
+  - zfsutils-linux  # Added for ZFS support
 
 # Docker configuration
 docker_packages:

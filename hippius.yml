@@ -1,0 +1,7 @@
+---
+- name: Deploy Hippius node
+  hosts: ipfs_nodes
+  become: yes
+
+  roles:
+    - hippius 

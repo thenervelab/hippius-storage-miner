@@ -31,12 +31,6 @@
     proto: "{{ item.proto }}"
   loop: "{{ ufw_allowed_ports }}"
 
-- name: Configure UFW for Subtensor P2P
-  ufw:
-    rule: allow
-    port: "{{ subtensor_ports.p2p }}"
-    proto: tcp
-    direction: in
 
 - name: Configure UFW for IPFS local ports
   ufw:

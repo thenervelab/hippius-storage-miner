@@ -24,11 +24,17 @@
     name: "{{ ipfs_user }}"
     system: yes
     shell: /bin/false
-    create_home: yes
+    create_home: no
     home: "{{ ipfs_home }}"
   become: yes
 
-- name: Create IPFS directory
+# Include ZFS setup tasks if disks are provided
+- name: Include ZFS setup tasks
+  include_tasks: zfs_setup.yml
+  when: zfs_disks is defined and zfs_disks | length > 0
+
+# The following task is conditionally executed if ZFS is not used
+- name: Create IPFS directory (if not using ZFS)
   file:
     path: "{{ ipfs_data_dir }}"
     state: directory
@@ -36,6 +42,7 @@
     group: "{{ ipfs_group }}"
     mode: '0755'
   become: yes
+  when: not (zfs_disks is defined and zfs_disks | length > 0)
 
 - name: Initialize IPFS
   shell: |

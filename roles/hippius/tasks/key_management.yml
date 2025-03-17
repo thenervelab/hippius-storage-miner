@@ -24,7 +24,7 @@
       when: not key_file.stat.exists and hippius_key == ""
 
     - name: Generate node key using Hippius binary
-      command: "{{ hippius_binary_path }}/{{ hippius_binary_name }} key generate-node-key --file {{ hippius_key_path }}{% if hippius_chain_spec_file is defined %} --chain {{ hippius_chain_spec_file }}{% endif %}"
+      command: "{{ hippius_binary_path }}/{{ hippius_binary_name }} key generate-node-key --file {{ hippius_key_path }}"
       register: generate_key_result
       when: not key_file.stat.exists and hippius_key == ""
 

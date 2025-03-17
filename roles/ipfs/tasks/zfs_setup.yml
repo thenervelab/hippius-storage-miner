@@ -1,0 +1,61 @@
+---
+# ZFS pool setup for IPFS data
+- name: Install ZFS dependencies
+  package:
+    name:
+      - zfsutils-linux
+    state: present
+  become: yes
+
+- name: Check if ZFS pool already exists
+  shell: zpool list | grep -q "^ipfs "
+  register: zfs_pool_exists
+  failed_when: false
+  changed_when: false
+  become: yes
+
+- name: Create ZFS pool for IPFS
+  command: zpool create ipfs {{ zfs_disks | join(' ') }}
+  become: yes
+  when: 
+    - zfs_disks is defined and zfs_disks | length > 0
+    - zfs_pool_exists.rc != 0
+
+- name: Ensure parent ZFS directory exists
+  file:
+    path: "/zfs"
+    state: directory
+    mode: '0755'
+  become: yes
+  when: zfs_disks is defined and zfs_disks | length > 0
+
+- name: Create ZFS dataset for IPFS home
+  zfs:
+    name: ipfs/ipfs_home
+    state: present
+    extra_zfs_properties:
+      mountpoint: "{{ ipfs_home }}"
+  become: yes
+  when: zfs_disks is defined and zfs_disks | length > 0
+
+- name: Create ZFS dataset for IPFS data
+  zfs:
+    name: ipfs/ipfs_data
+    state: present
+    extra_zfs_properties:
+      mountpoint: "{{ ipfs_data_dir }}"
+  become: yes
+  when: zfs_disks is defined and zfs_disks | length > 0
+
+- name: Set appropriate ownership for ZFS mount points
+  file:
+    path: "{{ item }}"
+    owner: "{{ ipfs_user }}"
+    group: "{{ ipfs_group }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ ipfs_home }}"
+    - "{{ ipfs_data_dir }}"
+  become: yes
+  when: zfs_disks is defined and zfs_disks | length > 0 

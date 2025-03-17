@@ -19,13 +19,6 @@
     owner: root
     group: root
 
-- name: Download chain spec file
-  get_url:
-    url: "{{ hippius_chain_spec_url }}"
-    dest: "{{ hippius_chain_spec_file }}"
-    mode: '0644'
-    owner: root
-    group: root
 
 - name: Ensure binary is executable
   file:

@@ -1,9 +1,9 @@
 ---
-- name: Deploy IPFS, Subtensor, and Hippius nodes
+- name: Deploy IPFS, and Hippius nodes
   hosts: ipfs_nodes
   become: yes
 
   roles:
-    - common
-    - ipfs
-    - hippius
+    - { role: common, tags: ['common'] }
+    - { role: ipfs, tags: ['ipfs'] }
+    - { role: hippius, tags: ['hippius'] }
