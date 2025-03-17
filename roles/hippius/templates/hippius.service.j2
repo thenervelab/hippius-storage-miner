@@ -8,17 +8,16 @@ User=root
 Group=root
 ExecStart={{ hippius_binary_path }}/{{ hippius_binary_name }} \
     --offchain-worker Always \
-    --validator \
     --base-path {{ hippius_data_dir }} \
     --port {{ hippius_ports.p2p }} \
     --rpc-cors all \
     --database paritydb \
     --name {{ hippius_node_name }} \
     --telemetry-url "{{ hippius_telemetry_url }}" \
-{% if hippius_chain_spec_file is defined %}
-    --chain {{ hippius_chain_spec_file }} \
-{% endif %}
+    --chain hippius \
     --node-key-file {{ hippius_key_path }}
+    --sync warp \
+    --no-mdns 
 
 Restart=always
 RestartSec={{ service_restart_delay }}
