@@ -1,23 +1,28 @@
-# Hippius Validator Ansible Deployment
+# Hippius Storage Miner Ansible Deployment
 
-This Ansible project provides a professional-grade deployment for multiple blockchain nodes including IPFS, Subtensor, and Hippius validator nodes.
+This Ansible project provides a professional-grade deployment for Hippius storage miner nodes with IPFS storage, optimized with ZFS for performance and reliability.
+
+## Overview
+
+The deployment configures:
+- IPFS node with optional ZFS storage pool
+- Hippius blockchain node configured as a storage miner
+- Proper system configuration and security settings
 
 ## Structure
 
 ```
-ansible/
-├── inventory/           # Environment-specific inventories
-│   ├── production/      # Production environment
-│   └── staging/        # Staging environment
-├── roles/              # Role-based tasks
-│   ├── common/         # System updates and firewall
-│   ├── docker/         # Docker installation
-│   ├── ipfs/          # IPFS node setup
-│   ├── subtensor/     # Subtensor node setup
-│   └── hippius/       # Hippius validator setup
-├── group_vars/         # Variables for all groups
-├── site.yml            # Main playbook
-└── README.md           # This file
+.
+├── inventory/           # Host inventory files  
+├── roles/               # Role-based tasks
+│   ├── common/          # System updates and firewall
+│   ├── ipfs/            # IPFS node with ZFS setup
+│   └── hippius/         # Hippius storage miner setup
+├── group_vars/          # Variables for all groups
+├── site.yml             # Main playbook
+├── hippius.yml          # Hippius-only playbook
+├── update_hippius.yml   # Binary update playbook  
+└── README.md            # This file
 ```
 
 ## Requirements
@@ -25,24 +30,72 @@ ansible/
 - Ansible 2.9+
 - Target hosts running Ubuntu 24.04
 - SSH access to target hosts
-- Docker and docker-compose installed on control machine
+- Root or sudo access on target hosts
+
+## Server Requirements
+
+### Ideal Server Specifications
+
+To run both the Hippius blockchain node and IPFS with a ZFS pool efficiently, these are the recommended server specifications:
+
+#### CPU
+- **Minimum**: 4 dedicated cores (8 vCPUs)
+- **Recommended**: 8+ dedicated cores (16+ vCPUs)
+- **Reasoning**: The blockchain node needs consistent CPU performance for validation and processing. ZFS benefits from additional cores for checksumming and compression operations.
+
+#### Memory (RAM)
+- **Minimum**: 16GB
+- **Recommended**: 32GB or more
+- **Reasoning**: 
+  - Blockchain nodes typically require 8-16GB RAM for optimal performance
+  - ZFS is memory-hungry and benefits significantly from extra RAM for the ARC cache
+  - IPFS can use substantial memory when handling many concurrent operations
+
+#### Storage
+- **System Disk**: 
+  - SSD with 100GB+ for OS and applications
+
+- **ZFS Pool for IPFS**:
+  - **Minimum**: 2TB usable space
+  - **Recommended**: 4TB+ usable space
+  - **Disk Type**: NVMe SSDs or enterprise SSDs preferred for performance
+  - **Configuration**: At least 2 disks for basic redundancy (mirror)
+  - **ZFS ARC Cache**: Benefits greatly from additional RAM
+
+- **Blockchain Data**: 
+  - **Initial**: 100GB reserved, SSD-based storage
+  - **Growth**: Plan for 50-100GB+ annual growth
+
+#### Network
+- **Bandwidth**: 1Gbps minimum, with at least 100Mbps sustained throughput
+- **Monthly Traffic**: Plan for 5-10TB+ of monthly traffic (especially for IPFS)
+- **Public IP**: Static public IP address recommended
+
+#### Example Server Configurations
+
+##### Mid-range Configuration
+- 8 vCPUs
+- 32GB RAM
+- 100GB SSD for system
+- 2x 2TB NVMe SSDs in ZFS mirror configuration (2TB usable)
+- 1Gbps network connection
+
+##### High-performance Configuration
+- 16+ vCPUs
+- 64GB RAM
+- 200GB SSD for system
+- 4x 2TB NVMe SSDs in RAID-Z/RAID10 configuration (6TB+ usable)
+- 10Gbps network connection
 
 ## Components
 
 ### IPFS Node
 - Runs as dedicated IPFS user
+- ZFS storage pool for optimal performance
 - Configurable API and gateway ports
 - Systemd service for automatic startup
 
-### Subtensor Node
-- Runs mainnet-lite node via Docker
-- Custom port mapping:
-  - External RPC: 9945 → Internal: 9944
-  - External P2P: 30334 → Internal: 30333
-  - External WS: 9934 → Internal: 9933
-- Configured with warp sync for faster synchronization
-
-### Hippius Validator
+### Hippius Node
 - Runs as root user
 - Configured with off-chain worker support
 - Default substrate ports (configurable)
@@ -54,16 +107,53 @@ ansible/
 
 ## Usage
 
-1. Configure your inventory in `inventory/[environment]/hosts.yml`
+### Basic Deployment
+
+1. Configure your inventory in `inventory/hosts`:
+   ```
+   [ipfs_nodes]
+   your-server-ip-or-hostname
+   ```
+
 2. Review and adjust variables in `group_vars/all.yml`:
-   - IPFS configuration
-   - Subtensor ports and resources
+   - IPFS configuration and ZFS settings
    - Hippius binary location and ports
+
 3. Run the playbook:
+   ```bash
+   ansible-playbook -i inventory/hosts site.yml
+   ```
+
+### ZFS Configuration
+
+To use ZFS for IPFS storage, specify the available disks:
 
 ```bash
-# For production
-ansible-playbook -i inventory/production/hosts.yml site.yml
+ansible-playbook -i inventory/hosts site.yml -e "zfs_disks=['sdb','sdc']"
+```
+
+This creates a ZFS pool named "ipfs" using the specified disks.
+
+### Running Only Hippius Role
+
+To deploy or update only the Hippius node:
+
+```bash
+ansible-playbook -i inventory/hosts site.yml --tags hippius
+```
+
+Or use the dedicated playbook:
+
+```bash
+ansible-playbook -i inventory/hosts hippius.yml
+```
+
+### Updating Hippius Binary
+
+To update just the Hippius binary without changing configuration:
+
+```bash
+ansible-playbook -i inventory/hosts update_hippius.yml
 ```
 
 ## Configuration
@@ -71,30 +161,33 @@ ansible-playbook -i inventory/production/hosts.yml site.yml
 ### Important Variables
 
 ```yaml
+# ZFS Configuration for IPFS
+zfs_disks: []  # Default empty, specify disk names like ['sdb','sdc']
+
 # IPFS Configuration
-ipfs_version: "v0.26.0"
+ipfs_version: "v0.33.2"
+ipfs_user: ipfs
+ipfs_group: ipfs
+ipfs_home: /zfs/ipfs    # ZFS dataset mountpoint
+ipfs_data_dir: "{{ ipfs_home }}/data"
 ipfs_api_address: "/ip4/127.0.0.1/tcp/5001"
 ipfs_gateway_address: "/ip4/127.0.0.1/tcp/8080"
 
-# Subtensor Configuration
-subtensor_ports:
-  rpc: 9945    # External port for RPC
-  p2p: 30334   # External port for P2P
-  ws: 9934     # External port for WebSocket
-
 # Hippius Configuration
-hippius_binary_url: "https://example.com/hippius-thebrain-latest.tar.gz"
+hippius_binary_url: "https://download.hippius.com/hippius"
+hippius_home: /opt/hippius
+hippius_data_dir: "{{ hippius_home }}/data"
 hippius_key: ""  # Optional: Provide ED25519 key in hex format
 hippius_ports:
   rpc: 9944
   p2p: 30333
   ws: 9933
+hippius_node_name: "hippius-storage-miner"
 ```
 
 ## Security Notes
 
 - IPFS runs as a dedicated system user
-- Subtensor runs in a Docker container with resource limits
 - Hippius validator runs as root (as required)
 - Firewall rules are automatically configured for all required ports
 
@@ -105,24 +198,45 @@ hippius_ports:
 ```bash
 # IPFS
 systemctl status ipfs
-
-# Subtensor
-docker-compose -f /opt/subtensor/docker-compose.yml ps
+systemctl restart ipfs
 
 # Hippius
 systemctl status hippius
+systemctl restart hippius
+```
+
+### ZFS Pool Management
+
+```bash
+# Check ZFS pool status
+zpool status ipfs
+
+# Check ZFS dataset space usage
+zfs list
+
+# Scrub ZFS pool (recommended monthly)
+zpool scrub ipfs
 ```
 
 ## Troubleshooting
 
-Check service logs:
+### Check service logs:
 ```bash
 # IPFS logs
 journalctl -u ipfs -f
 
-# Subtensor logs
-docker-compose -f /opt/subtensor/docker-compose.yml logs -f
-
 # Hippius logs
 journalctl -u hippius -f
 ```
+
+### Common Issues
+
+#### IPFS Not Starting
+- Check permissions: `ls -la /zfs/ipfs`
+- Verify ZFS mounts: `zfs list`
+- Check IPFS config: `cat /zfs/ipfs/data/config`
+
+#### Hippius Not Connecting to Network
+- Check bootnodes configuration
+- Verify firewall settings: `ufw status`
+- Check Hippius logs for specific errors
