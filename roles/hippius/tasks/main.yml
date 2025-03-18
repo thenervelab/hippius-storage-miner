@@ -20,6 +20,7 @@
     group: root
 
 
+
 - name: Ensure binary is executable
   file:
     path: "{{ hippius_binary_path }}/{{ hippius_binary_name }}"
