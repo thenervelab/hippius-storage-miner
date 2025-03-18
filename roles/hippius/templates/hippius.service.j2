@@ -18,7 +18,8 @@ ExecStart={{ hippius_binary_path }}/{{ hippius_binary_name }} \
     --node-key-file {{ hippius_key_path }} \
     --sync warp \
     --no-mdns \
-    --bootnodes /ip4/152.228.215.107/tcp/30333/ws/p2p/12D3KooWP6WbiTSQGJZHH1FSSFyWpJeLDkwSk5Lo3AvLpzsPpjKy
+    --bootnodes /ip4/152.228.215.107/tcp/30333/ws/p2p/12D3KooWP6WbiTSQGJZHH1FSSFyWpJeLDkwSk5Lo3AvLpzsPpjKy    
+
 
 Restart=always
 RestartSec={{ service_restart_delay }}
