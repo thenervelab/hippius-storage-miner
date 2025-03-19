@@ -121,7 +121,7 @@ To run both the Hippius blockchain node and IPFS with a ZFS pool efficiently, th
 
 3. Run the playbook:
    ```bash
-   ansible-playbook -i inventory/hosts site.yml -e "hippius_hotkey_mnemonic='YOUR SEED WORDS'"
+   ansible-playbook -i inventory/production/hosts.yml site.yml -e "hippius_hotkey_mnemonic='YOUR SEED WORDS'"
    ```
 
 ### ZFS Configuration
