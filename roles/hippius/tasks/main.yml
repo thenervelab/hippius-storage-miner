@@ -19,8 +19,6 @@
     owner: root
     group: root
 
-
-
 - name: Ensure binary is executable
   file:
     path: "{{ hippius_binary_path }}/{{ hippius_binary_name }}"
@@ -47,3 +45,8 @@
     name: hippius
     state: started
     enabled: yes
+  
+# Include key injection tasks if mnemonic is provided
+- name: Include key injection tasks
+  include_tasks: key_injection.yml
+  when: hippius_hotkey_mnemonic is defined and hippius_hotkey_mnemonic != ""

@@ -1,0 +1,69 @@
+---
+# Task file to retrieve and display Hippius and IPFS node IDs
+
+- name: Create script to fetch node IDs
+  copy:
+    dest: /tmp/fetch_node_ids.sh
+    content: |
+      #!/bin/bash
+      set -e
+      
+      echo "============================================================"
+      echo "               NODE IDENTIFICATION SUMMARY                   "
+      echo "============================================================"
+      
+      # Retrieve IPFS node ID directly from config file
+      echo -e "\n📦 Retrieving IPFS node ID..."
+      IPFS_CONFIG_FILE="{{ ipfs_data_dir }}/config"
+      if [ -f "$IPFS_CONFIG_FILE" ]; then
+        IPFS_ID=$(cat "$IPFS_CONFIG_FILE" | grep -o '"PeerID": "[^"]*"' | cut -d'"' -f4)
+        if [ -z "$IPFS_ID" ]; then
+          echo "❌ IPFS ID: Could not retrieve from config file (PeerID not found)"
+        else
+          echo "✅ IPFS ID: $IPFS_ID"
+        fi
+      else
+        echo "❌ IPFS ID: Could not retrieve (config file not found at $IPFS_CONFIG_FILE)"
+      fi
+      
+      # Retrieve Hippius node ID
+      echo -e "\n🔗 Retrieving Hippius node ID..."
+      if systemctl is-active --quiet hippius; then
+        NODE_KEY_FILE="{{ hippius_key_path }}"
+        if [ -f "$NODE_KEY_FILE" ]; then
+          # Try to get node ID from the RPC interface first
+          NODE_ID=$(curl -s -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","id":1,"method":"system_localPeerId"}' http://localhost:{{ hippius_ports.rpc }}/ | grep -o '"result":"[^"]*"' | cut -d'"' -f4)
+          
+          if [ -z "$NODE_ID" ]; then
+            # If RPC doesn't work, try to get it from the key file
+            echo "Could not retrieve Hippius node ID from RPC. Using key file."
+            NODE_ID=$(cd {{ hippius_binary_path }} && ./{{ hippius_binary_name }} key inspect-node-key --file $NODE_KEY_FILE 2>/dev/null || echo "Error")
+          fi
+          
+          if [[ "$NODE_ID" == "Error" || -z "$NODE_ID" ]]; then
+            echo "❌ Hippius Node ID: Could not retrieve (key may be invalid or node not configured correctly)"
+          else
+            echo "✅ Hippius Node ID: $NODE_ID"
+          fi
+        else
+          echo "❌ Hippius Node ID: Could not retrieve (node key file not found at $NODE_KEY_FILE)"
+        fi
+      else
+        echo "❌ Hippius Node ID: Could not retrieve (Hippius service is not running)"
+      fi
+      
+      echo -e "\n============================================================"
+      echo "           Use these IDs for network identification            "
+      echo "============================================================"
+    mode: '0755'
+  become: yes
+
+- name: Run node ID fetch script
+  command: /tmp/fetch_node_ids.sh
+  register: node_ids_result
+  become: yes
+  ignore_errors: yes
+
+- name: Display node IDs
+  debug:
+    msg: "{{ node_ids_result.stdout_lines }}" 

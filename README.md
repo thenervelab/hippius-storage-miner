@@ -156,6 +156,25 @@ To update just the Hippius binary without changing configuration:
 ansible-playbook -i inventory/hosts update_hippius.yml
 ```
 
+### Injecting HIPS Key for Storage Mining
+
+To inject your HIPS key for storage mining:
+
+```bash
+ansible-playbook -i inventory/hosts inject_keys.yml -e "hippius_hotkey_mnemonic='word1 word2 ... word12'"
+```
+
+This will:
+1. Connect to the already running Hippius node
+2. Only inject the HIPS key required for storage mining
+3. Verify the key was injected correctly
+
+**Requirements:**
+- The Hippius node must be running with RPC enabled
+- No service interruption occurs during the key injection process
+
+**Important**: Always protect your mnemonic phrase! Use single quotes around it to prevent shell expansion issues.
+
 ## Configuration
 
 ### Important Variables
@@ -177,7 +196,8 @@ ipfs_gateway_address: "/ip4/127.0.0.1/tcp/8080"
 hippius_binary_url: "https://download.hippius.com/hippius"
 hippius_home: /opt/hippius
 hippius_data_dir: "{{ hippius_home }}/data"
-hippius_key: ""  # Optional: Provide ED25519 key in hex format
+hippius_key: ""  # Optional: Provide an existing ED25519 key in hex format
+hippius_hotkey_mnemonic: ""  # Optional: Provide mnemonic for key injection
 hippius_ports:
   rpc: 9944
   p2p: 30333
@@ -204,6 +224,16 @@ systemctl restart ipfs
 systemctl status hippius
 systemctl restart hippius
 ```
+
+### Viewing Node IDs
+
+To display both the Hippius node ID and IPFS node ID:
+
+```bash
+ansible-playbook -i inventory/hosts show_node_ids.yml
+```
+
+This command will output a formatted summary of node IDs that you can use for network identification and troubleshooting.
 
 ### ZFS Pool Management
 

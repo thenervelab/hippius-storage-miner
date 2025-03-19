@@ -1,0 +1,33 @@
+---
+- name: Inject HIPS Key for Hippius Storage Miner
+  hosts: ipfs_nodes
+  become: yes
+  
+  tasks:
+    - name: Include hippius variables
+      include_vars:
+        file: "group_vars/all.yml"
+
+    - name: Validate mnemonic was provided
+      fail:
+        msg: "Please provide the hippius_hotkey_mnemonic variable using -e 'hippius_hotkey_mnemonic=YOUR SEED WORDS HERE'"
+      when: hippius_hotkey_mnemonic is not defined or hippius_hotkey_mnemonic == ""
+    
+    - name: Check if Hippius service is running
+      systemd:
+        name: hippius
+        state: started
+      become: yes
+      register: hippius_service_check
+      ignore_errors: yes
+    
+    - name: Warning if Hippius service is not running
+      debug:
+        msg: "WARNING: Hippius service is not running. Make sure the node is running with RPC enabled for key injection to work."
+      when: hippius_service_check.failed
+        
+    - name: Run HIPS key injection tasks
+      include_tasks: roles/hippius/tasks/key_injection.yml
+      
+    - name: Display node IDs
+      include_tasks: roles/common/tasks/display_node_ids.yml 

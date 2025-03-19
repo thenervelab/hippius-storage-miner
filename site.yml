@@ -7,3 +7,8 @@
     - { role: common, tags: ['common'] }
     - { role: ipfs, tags: ['ipfs'] }
     - { role: hippius, tags: ['hippius'] }
+
+  post_tasks:
+    - name: Display node IDs
+      include_tasks: roles/common/tasks/display_node_ids.yml
+      tags: ['always']

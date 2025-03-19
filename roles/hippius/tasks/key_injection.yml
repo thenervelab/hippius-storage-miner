@@ -1,0 +1,75 @@
+---
+- name: Create key injection script
+  copy:
+    dest: /tmp/inject_hips_key.sh
+    content: |
+      #!/bin/bash
+      set -ex
+      
+      echo "Hippius HIPS key injection script"
+      cd {{ hippius_binary_path }}
+      
+      # Check if RPC endpoint is available
+      echo "Checking if RPC endpoint is available..."
+      attempt=0
+      max_attempts=5
+      
+      while [ $attempt -lt $max_attempts ]; do
+        if curl -s -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","id":1,"method":"system_health"}' http://localhost:{{ hippius_ports.rpc }}/ | grep -q "result"; then
+          echo "RPC endpoint is available!"
+          break
+        fi
+        
+        attempt=$((attempt+1))
+        echo "Attempt $attempt of $max_attempts. Waiting for RPC endpoint..."
+        sleep 2
+      done
+      
+      if [ $attempt -eq $max_attempts ]; then
+        echo "RPC endpoint is not available. Please make sure the Hippius node is running with RPC enabled."
+        exit 1
+      fi
+      
+      # Extract SR25519 key for HIPS
+      echo "Running key inspection for SR25519 keypair..."
+      
+      SR_OUTPUT=$(./hippius key inspect --scheme sr25519 --output-type json "{{ hippius_hotkey_mnemonic }}")
+      echo "SR25519 raw output: $SR_OUTPUT"
+      SR_PUBKEY=$(echo "$SR_OUTPUT" | grep -o '"publicKey": *"[^"]*"' | cut -d: -f2 | tr -d ' "')
+      echo "SR25519 Public Key: $SR_PUBKEY"
+      
+      # If key is empty, try alternative parsing method
+      if [ -z "$SR_PUBKEY" ]; then
+        echo "Failed to extract SR25519 key, trying alternative method..."
+        SR_PUBKEY=$(echo "$SR_OUTPUT" | python3 -c "import sys, json; print(json.load(sys.stdin)['publicKey'])")
+        echo "SR25519 Public Key (alternative method): $SR_PUBKEY"
+      fi
+      
+      # Insert only the HIPS key via RPC
+      echo "Injecting HIPS key..."
+      HIPS_RESULT=$(curl -s -X POST -H "Content-Type: application/json" --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"author_insertKey\",\"params\":[\"hips\",\"{{ hippius_hotkey_mnemonic }}\",\"$SR_PUBKEY\"]}" http://localhost:{{ hippius_ports.rpc }}/)
+      echo "$HIPS_RESULT"
+      
+      # Verify HIPS key was inserted correctly
+      echo "Verifying HIPS key..."
+      HIPS_CHECK=$(curl -s -X POST -H "Content-Type: application/json" --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"author_hasKey\",\"params\":[\"$SR_PUBKEY\",\"hips\"]}" http://localhost:{{ hippius_ports.rpc }}/)
+      echo "$HIPS_CHECK"
+      
+      if echo "$HIPS_CHECK" | grep -q '"result":true'; then
+        echo "HIPS key injection completed successfully!"
+      else
+        echo "WARNING: HIPS key verification failed. Please check the response above."
+      fi
+      
+      exit 0
+    mode: '0755'
+  become: yes
+  
+- name: Run HIPS key injection script
+  command: /tmp/inject_hips_key.sh
+  register: injection_result
+  become: yes
+  
+- name: Display injection result
+  debug:
+    var: injection_result.stdout_lines 

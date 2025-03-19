@@ -1,0 +1,12 @@
+---
+- name: Display Hippius and IPFS Node IDs
+  hosts: ipfs_nodes
+  become: yes
+  
+  tasks:
+    - name: Include variables
+      include_vars:
+        file: "group_vars/all.yml"
+        
+    - name: Display node IDs
+      include_tasks: roles/common/tasks/display_node_ids.yml 

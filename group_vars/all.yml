@@ -12,6 +12,7 @@ hippius_data_dir: "{{ hippius_home }}/data"
 hippius_binary_path: "{{ hippius_home }}/bin"
 hippius_key_path: "{{ hippius_data_dir }}/chains/hippius_mainnet/network/secret_ed25519"
 hippius_key: ""  # Optional: Provide an existing ED25519 key in hex format
+hippius_hotkey_mnemonic: ""  # Optional: Provide mnemonic phrases for key injection
 hippius_ports:
   rpc: 9944
   p2p: 30333
