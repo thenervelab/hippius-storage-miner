@@ -31,29 +31,26 @@
 # Auto-detect available unpartitioned disks if no disks are explicitly defined
 - name: Auto-detect unpartitioned disks
   shell: |
-    # Find disks without partitions, exclude boot disk and small disks
-    BOOT_DISK=$(lsblk -ndo NAME,MOUNTPOINT | grep -E '/$|/boot' | head -1 | awk '{print $1}' | sed 's/[0-9]*$//')
-    
-    # Get all disk devices
-    ALL_DISKS=$(lsblk -dn -o NAME,TYPE,SIZE,MODEL | grep 'disk' | awk '$1 !~ /^'$BOOT_DISK'/ && $3 ~ /G|T/' | awk '{print $1}')
-    
-    # Get all partitioned disks (parent devices)
-    PARTITIONED_DISKS=$(lsblk -ln | grep -v disk | cut -d' ' -f1 | sed 's/[0-9]*$//' | sort -u)
-    
-    # Find disks without partitions
-    for DISK in $ALL_DISKS; do
-      PARTITIONED=0
-      for PDISK in $PARTITIONED_DISKS; do
-        if [ "$DISK" = "$PDISK" ]; then
-          PARTITIONED=1
-          break
-        fi
-      done
+    # Simpler approach to find candidate disks
+    # Look for disks with no children and size > 1TB (likely storage disks)
+    lsblk -b -n -o NAME,TYPE,SIZE,MOUNTPOINT | grep -E ' disk ' | grep -v -E '(boot|efi|/$|/home|swap)' | \
+    while read disk_line; do
+      DISK_NAME=$(echo "$disk_line" | awk '{print $1}')
+      DISK_SIZE=$(echo "$disk_line" | awk '{print $3}')
       
-      if [ $PARTITIONED -eq 0 ]; then
-        echo "/dev/$DISK"
+      # Check if disk has any partitions or children
+      CHILDREN=$(lsblk -n -o NAME | grep -E "^${DISK_NAME}p?[0-9]+" | wc -l)
+      
+      # Only include disks with no children and size > 1TB (likely storage disks)
+      if [ "$CHILDREN" -eq 0 ] && [ "$DISK_SIZE" -gt 1000000000000 ]; then
+        echo "/dev/$DISK_NAME"
       fi
     done
+    
+    # Show debug information about all disks
+    echo "===== DEBUG DISK INFO =====" >&2
+    lsblk -o NAME,TYPE,SIZE,MOUNTPOINT >&2
+    echo "===== END DEBUG =====" >&2
   register: auto_detected_disks
   changed_when: false
   become: yes
@@ -69,10 +66,13 @@
   tags:
     - ipfs-storage-max
 
-# Debug ZFS variables to understand disk configuration
-- name: Debug ZFS variables
+# Output detailed debug information
+- name: Show detailed disk information
   debug:
-    msg: "ZFS_DISKS is {% if zfs_disks is defined %}defined as {{ zfs_disks }} ({{ zfs_disks | length }} disks){% else %}not defined{% endif %}"
+    msg: 
+      - "Auto-detected disks: {{ auto_detected_disks.stdout_lines | default([]) }}"
+      - "Debug output: {{ auto_detected_disks.stderr_lines | default([]) }}"
+      - "Final ZFS disks to use: {{ zfs_disks | default([]) }}"
   tags: 
     - ipfs-storage-max
 
@@ -81,18 +81,7 @@
   include_tasks: zfs_setup.yml
   when: zfs_disks is defined and zfs_disks | length > 0
 
-# The following task is conditionally executed if ZFS is not used
-- name: Create IPFS directory (if not using ZFS)
-  file:
-    path: "{{ ipfs_data_dir }}"
-    state: directory
-    owner: "{{ ipfs_user }}"
-    group: "{{ ipfs_group }}"
-    mode: '0755'
-  become: yes
-  when: not (zfs_disks is defined and zfs_disks | length > 0)
-
-# Check if ZFS pool exists after setup
+# Check if ZFS pool exists after attempted setup
 - name: Check if IPFS ZFS pool exists
   shell: zpool list | grep -q "^ipfs " || echo "no_pool"
   register: ipfs_pool_exists
@@ -102,6 +91,17 @@
   tags: 
     - ipfs-storage-max
 
+# The following task is conditionally executed if ZFS setup was not successful
+- name: Create IPFS directory (if ZFS setup was not successful)
+  file:
+    path: "{{ ipfs_data_dir }}"
+    state: directory
+    owner: "{{ ipfs_user }}"
+    group: "{{ ipfs_group }}"
+    mode: '0755'
+  become: yes
+  when: (zfs_disks is not defined or zfs_disks | length == 0) or ipfs_pool_exists.stdout == "no_pool"
+
 # Get ZFS pool size when using ZFS - after pool has been created
 - name: Get ZFS pool size
   shell: zpool list -H -o size ipfs
@@ -109,7 +109,7 @@
   become: yes
   changed_when: false
   failed_when: false  # Don't fail if pool doesn't exist
-  when: (zfs_disks is defined and zfs_disks | length > 0) or (ipfs_pool_exists.rc == 0)
+  when: ipfs_pool_exists.stdout != "no_pool"
   tags: 
     - ipfs-storage-max
 
