@@ -33,6 +33,33 @@
   include_tasks: zfs_setup.yml
   when: zfs_disks is defined and zfs_disks | length > 0
 
+# Debug ZFS variables to understand why tasks are skipped
+- name: Debug ZFS variables
+  debug:
+    msg: "ZFS_DISKS is {% if zfs_disks is defined %}defined ({{ zfs_disks | length }} disks){% else %}not defined{% endif %}"
+  tags: 
+    - ipfs-storage-max
+
+# Check if ZFS pool exists regardless of zfs_disks variable
+- name: Check if IPFS ZFS pool exists
+  shell: zpool list | grep -q "^ipfs " || echo "no_pool"
+  register: ipfs_pool_exists
+  failed_when: false
+  changed_when: false
+  become: yes
+  tags: 
+    - ipfs-storage-max
+
+# Get ZFS pool size when using ZFS - using both the zfs_disks check and direct pool detection
+- name: Get ZFS pool size
+  shell: zpool list -H -o size ipfs
+  register: zfs_pool_size
+  become: yes
+  changed_when: false
+  when: (zfs_disks is defined and zfs_disks | length > 0) or (ipfs_pool_exists.rc == 0)
+  tags: 
+    - ipfs-storage-max
+
 # The following task is conditionally executed if ZFS is not used
 - name: Create IPFS directory (if not using ZFS)
   file:
@@ -55,6 +82,20 @@
   become: yes
   args:
     creates: "{{ ipfs_data_dir }}/config"
+
+# Set IPFS StorageMax to ZFS pool size when using ZFS
+- name: Set IPFS StorageMax to ZFS pool size
+  shell: |
+    export IPFS_PATH="{{ ipfs_data_dir }}"
+    # Convert the ZFS size format (like 10G, 2T) to IPFS format (10GB, 2TB)
+    SIZE_VALUE="{{ zfs_pool_size.stdout }}"
+    SIZE_VALUE=$(echo $SIZE_VALUE | sed 's/G$/GB/;s/T$/TB/;s/P$/PB/;s/E$/EB/')
+    ipfs config Datastore.StorageMax "$SIZE_VALUE"
+  become: yes
+  when: ((zfs_disks is defined and zfs_disks | length > 0) or (ipfs_pool_exists.rc == 0)) and zfs_pool_size.stdout is defined
+  notify: Restart IPFS service
+  tags: 
+    - ipfs-storage-max
 
 - name: Fix IPFS directory permissions
   file:

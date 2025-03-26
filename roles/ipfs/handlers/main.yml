@@ -1,0 +1,8 @@
+---
+# Handlers for IPFS service
+
+- name: Restart IPFS service
+  systemd:
+    name: ipfs
+    state: restarted
+  become: yes 

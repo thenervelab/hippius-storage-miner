@@ -270,3 +270,10 @@ journalctl -u hippius -f
 - Check bootnodes configuration
 - Verify firewall settings: `ufw status`
 - Check Hippius logs for specific errors
+
+
+
+
+## Update only the ipfs storage:
+
+ansible-playbook -i inventory/hosts site.yml --tags ipfs-storage-max
