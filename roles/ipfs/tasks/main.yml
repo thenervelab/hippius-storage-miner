@@ -81,26 +81,6 @@
   include_tasks: zfs_setup.yml
   when: zfs_disks is defined and zfs_disks | length > 0
 
-# Check if ZFS pool exists regardless of zfs_disks variable
-- name: Check if IPFS ZFS pool exists
-  shell: zpool list | grep -q "^ipfs " || echo "no_pool"
-  register: ipfs_pool_exists
-  failed_when: false
-  changed_when: false
-  become: yes
-  tags: 
-    - ipfs-storage-max
-
-# Get ZFS pool size when using ZFS - using both the zfs_disks check and direct pool detection
-- name: Get ZFS pool size
-  shell: zpool list -H -o size ipfs
-  register: zfs_pool_size
-  become: yes
-  changed_when: false
-  when: (zfs_disks is defined and zfs_disks | length > 0) or (ipfs_pool_exists.rc == 0)
-  tags: 
-    - ipfs-storage-max
-
 # The following task is conditionally executed if ZFS is not used
 - name: Create IPFS directory (if not using ZFS)
   file:
@@ -111,6 +91,27 @@
     mode: '0755'
   become: yes
   when: not (zfs_disks is defined and zfs_disks | length > 0)
+
+# Check if ZFS pool exists after setup
+- name: Check if IPFS ZFS pool exists
+  shell: zpool list | grep -q "^ipfs " || echo "no_pool"
+  register: ipfs_pool_exists
+  failed_when: false
+  changed_when: false
+  become: yes
+  tags: 
+    - ipfs-storage-max
+
+# Get ZFS pool size when using ZFS - after pool has been created
+- name: Get ZFS pool size
+  shell: zpool list -H -o size ipfs
+  register: zfs_pool_size
+  become: yes
+  changed_when: false
+  failed_when: false  # Don't fail if pool doesn't exist
+  when: (zfs_disks is defined and zfs_disks | length > 0) or (ipfs_pool_exists.rc == 0)
+  tags: 
+    - ipfs-storage-max
 
 - name: Initialize IPFS
   shell: |
@@ -133,7 +134,7 @@
     SIZE_VALUE=$(echo $SIZE_VALUE | sed 's/G$/GB/;s/T$/TB/;s/P$/PB/;s/E$/EB/')
     ipfs config Datastore.StorageMax "$SIZE_VALUE"
   become: yes
-  when: ((zfs_disks is defined and zfs_disks | length > 0) or (ipfs_pool_exists.rc == 0)) and zfs_pool_size.stdout is defined
+  when: ((zfs_disks is defined and zfs_disks | length > 0) or (ipfs_pool_exists.rc == 0)) and zfs_pool_size.stdout is defined and zfs_pool_size.stdout != ""
   notify: Restart IPFS service
   tags: 
     - ipfs-storage-max
