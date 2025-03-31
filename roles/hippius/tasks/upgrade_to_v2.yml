@@ -1,0 +1,80 @@
+---
+# Tasks for upgrading to Hippius v2
+
+- name: Stop Hippius service before upgrade
+  systemd:
+    name: hippius
+    state: stopped
+  become: yes
+  tags:
+    - upgrade-to-v2
+
+- name: Remove frontier database directory
+  file:
+    path: "/opt/hippius/data/chains/hippius-mainnet/frontier"
+    state: absent
+  become: yes
+  tags:
+    - upgrade-to-v2
+
+- name: Remove paritydb database directory
+  file:
+    path: "/opt/hippius/data/chains/hippius-mainnet/paritydb"
+    state: absent
+  become: yes
+  tags:
+    - upgrade-to-v2
+
+# Remove and replace the Hippius binary with the new version
+- name: Remove existing Hippius binary
+  file:
+    path: "{{ hippius_binary_path }}/{{ hippius_binary_name }}"
+    state: absent
+  become: yes
+  tags:
+    - upgrade-to-v2
+
+- name: Download new Hippius v2 binary
+  get_url:
+    url: "{{ hippius_binary_url }}"
+    dest: "{{ hippius_binary_path }}/{{ hippius_binary_name }}"
+    mode: '0755'
+    owner: root
+    group: root
+  become: yes
+  tags:
+    - upgrade-to-v2
+
+- name: Ensure new binary is executable
+  file:
+    path: "{{ hippius_binary_path }}/{{ hippius_binary_name }}"
+    mode: '0755'
+    owner: root
+    group: root
+  become: yes
+  tags:
+    - upgrade-to-v2
+
+- name: Update Hippius service file
+  template:
+    src: hippius.service.j2
+    dest: /etc/systemd/system/hippius.service
+    mode: '0644'
+  become: yes
+  tags:
+    - upgrade-to-v2
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes
+  become: yes
+  tags:
+    - upgrade-to-v2
+
+- name: Start Hippius service after upgrade
+  systemd:
+    name: hippius
+    state: started
+  become: yes
+  tags:
+    - upgrade-to-v2 

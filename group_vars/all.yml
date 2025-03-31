@@ -35,7 +35,7 @@ ipfs_gateway_address: "/ip4/127.0.0.1/tcp/8080"
 # For example: ansible-playbook site.yml -e "zfs_disks=['sdb','sdc']"
 # Leave empty to use a regular directory instead of ZFS
 # zfs_disks: ['sdb','sdc', 'sdd','sde']  # Default to empty list, which disables ZFS setup ['sdb','sdc']
-zfs_disks: ['sdb','sdc', 'sdd','sde']
+#zfs_disks: ['sda','sdb']
 # Service configuration
 service_restart_delay: 10
 service_nofile_limit: 65536

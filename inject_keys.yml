@@ -8,9 +8,9 @@
       include_vars:
         file: "group_vars/all.yml"
 
-    - name: Validate mnemonic was provided
+    - name: Check if host has mnemonic defined
       fail:
-        msg: "Please provide the hippius_hotkey_mnemonic variable using -e 'hippius_hotkey_mnemonic=YOUR SEED WORDS HERE'"
+        msg: "No mnemonic defined for this host. Please define hippius_hotkey_mnemonic in inventory or use -e hippius_hotkey_mnemonic='YOUR SEED WORDS HERE'"
       when: hippius_hotkey_mnemonic is not defined or hippius_hotkey_mnemonic == ""
     
     - name: Check if Hippius service is running
@@ -23,7 +23,7 @@
     
     - name: Warning if Hippius service is not running
       debug:
-        msg: "WARNING: Hippius service is not running. Make sure the node is running with RPC enabled for key injection to work."
+        msg: "WARNING: Hippius service is not running on {{ inventory_hostname }}. Make sure the node is running with RPC enabled for key injection to work."
       when: hippius_service_check.failed
         
     - name: Run HIPS key injection tasks

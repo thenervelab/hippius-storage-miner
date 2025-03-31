@@ -156,6 +156,24 @@ To update just the Hippius binary without changing configuration:
 ansible-playbook -i inventory/hosts update_hippius.yml
 ```
 
+### Upgrading to Hippius v2
+
+To perform a complete upgrade to Hippius v2, which includes stopping the service, updating the binary, and cleaning the database:
+
+```bash
+ansible-playbook -i inventory/hosts site.yml --tags upgrade-to-v2
+```
+
+This upgrade process will:
+1. Stop the Hippius service
+2. Remove the existing chain databases (`frontier` and `paritydb`)
+3. Remove the existing Hippius binary
+4. Download the new Hippius v2 binary
+5. Update the service configuration
+6. Restart the Hippius service
+
+**Important**: This is a breaking change that will reset the node's database. Ensure you understand the implications before running this upgrade.
+
 ### Injecting HIPS Key for Storage Mining
 
 To inject your HIPS key for storage mining:
@@ -271,9 +289,14 @@ journalctl -u hippius -f
 - Verify firewall settings: `ufw status`
 - Check Hippius logs for specific errors
 
+## Task-specific Operations
 
+### Update IPFS Storage Configuration
 
+To update only the IPFS storage maximum size (particularly after adding disks to the ZFS pool):
 
-## Update only the ipfs storage:
-
+```bash
 ansible-playbook -i inventory/hosts site.yml --tags ipfs-storage-max
+```
+
+This will detect the ZFS pool size and configure IPFS to use the maximum available storage.

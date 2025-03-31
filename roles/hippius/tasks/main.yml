@@ -30,6 +30,7 @@
 - name: Include key management tasks
   include_tasks: key_management.yml
 
+# Regular installation and service setup
 - name: Create Hippius service
   template:
     src: hippius.service.j2
@@ -50,3 +51,9 @@
 - name: Include key injection tasks
   include_tasks: key_injection.yml
   when: hippius_hotkey_mnemonic is defined and hippius_hotkey_mnemonic != ""
+
+# Include v2 upgrade tasks - these will only run when the upgrade-to-v2 tag is specified
+- name: Include v2 upgrade tasks
+  include_tasks: upgrade_to_v2.yml
+  tags:
+    - upgrade-to-v2
