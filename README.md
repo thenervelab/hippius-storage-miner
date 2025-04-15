@@ -1,302 +1,292 @@
-# Hippius Storage Miner Ansible Deployment
+# Hippius Storage Miner Deployment
 
-This Ansible project provides a professional-grade deployment for Hippius storage miner nodes with IPFS storage, optimized with ZFS for performance and reliability.
+## Table of Contents
+
+- [Overview](#overview)
+- [What you need before we start](#what-you-need-before-we-start)
+  - [Install ansible](#install-ansible)
+  - [Clone the storage miner repo](#clone-the-storage-miner-repo)
+  - [Install mitogen (optional)](#optional-install-mitogen-for-faster-ansible-runs)
+  - [Server requirements](#server-requirements)
+  - [Create SSH key](#create-publicprivate-key-pairs)
+  - [SSH Access Setup](#ssh-access-setup)
+- [Updating configurations](#updating-configurations)
+- [Running the playbooks](#running-the-playbooks)
+  - [Main Playbook](#run-the-main-playbook)
+  - [Other Playbooks](#other-playbooks)
+- [Registering your first node](#registering-your-first-node-on-hippius-network)
+- [Registering additional nodes](#registering-additional-nodes-on-hippius-network)
+- [Useful commands](#useful-commands)
+  - [IPFS](#ipfs)
+  - [Hippius](#hippius)
+  - [ZFS Pool](#zfs-pool)
+- [Common errors](#common-errors)
+  - [IPFS not starting](#ipfs-not-starting)
+  - [Hippius not connecting](#hippius-not-connecting-to-network)
 
 ## Overview
+This guide helps you deploy a storage miner using IPFS for decentralised storage, backed by ZFS for reliable disk management and register it on the hippius network
 
-The deployment configures:
-- IPFS node with optional ZFS storage pool
-- Hippius blockchain node configured as a storage miner
-- Proper system configuration and security settings
+By the end of this setup, you'll have:
+- A machine (local or VM) with ansible installed and configured
+- A target host fully set up
+- A registered storage miner on the hippius network
 
-## Structure
+## What you need before we start
+- **A local machine (Ubuntu or WSL2 on Windows) or a small VM running Ubuntu. This is where you will run the setup commands using ansible**
 
-```
-.
-├── inventory/           # Host inventory files  
-├── roles/               # Role-based tasks
-│   ├── common/          # System updates and firewall
-│   ├── ipfs/            # IPFS node with ZFS setup
-│   └── hippius/         # Hippius storage miner setup
-├── group_vars/          # Variables for all groups
-├── site.yml             # Main playbook
-├── hippius.yml          # Hippius-only playbook
-├── update_hippius.yml   # Binary update playbook  
-└── README.md            # This file
-```
-
-## Requirements
-
-- Ansible 2.9+
-- Target hosts running Ubuntu 24.04
-- SSH access to target hosts
-- Root or sudo access on target hosts
-
-## Server Requirements
-
-### Ideal Server Specifications
-
-To run both the Hippius blockchain node and IPFS with a ZFS pool efficiently, these are the recommended server specifications:
-
-#### CPU
-- **Minimum**: 4 dedicated cores (8 vCPUs)
-- **Recommended**: 8+ dedicated cores (16+ vCPUs)
-- **Reasoning**: The blockchain node needs consistent CPU performance for validation and processing. ZFS benefits from additional cores for checksumming and compression operations.
-
-#### Memory (RAM)
-- **Minimum**: 16GB
-- **Recommended**: 32GB or more
-- **Reasoning**: 
-  - Blockchain nodes typically require 8-16GB RAM for optimal performance
-  - ZFS is memory-hungry and benefits significantly from extra RAM for the ARC cache
-  - IPFS can use substantial memory when handling many concurrent operations
-
-#### Storage
-- **System Disk**: 
-  - SSD with 100GB+ for OS and applications
-
-- **ZFS Pool for IPFS**:
-  - **Minimum**: 2TB usable space
-  - **Recommended**: 4TB+ usable space
-  - **Disk Type**: NVMe SSDs or enterprise SSDs preferred for performance
-  - **Configuration**: At least 2 disks for basic redundancy (mirror)
-  - **ZFS ARC Cache**: Benefits greatly from additional RAM
-
-- **Blockchain Data**: 
-  - **Initial**: 100GB reserved, SSD-based storage
-  - **Growth**: Plan for 50-100GB+ annual growth
-
-#### Network
-- **Bandwidth**: 1Gbps minimum, with at least 100Mbps sustained throughput
-- **Monthly Traffic**: Plan for 5-10TB+ of monthly traffic (especially for IPFS)
-- **Public IP**: Static public IP address recommended
-
-#### Example Server Configurations
-
-##### Mid-range Configuration
-- 8 vCPUs
-- 32GB RAM
-- 100GB SSD for system
-- 2x 2TB NVMe SSDs in ZFS mirror configuration (2TB usable)
-- 1Gbps network connection
-
-##### High-performance Configuration
-- 16+ vCPUs
-- 64GB RAM
-- 200GB SSD for system
-- 4x 2TB NVMe SSDs in RAID-Z/RAID10 configuration (6TB+ usable)
-- 10Gbps network connection
-
-## Components
-
-### IPFS Node
-- Runs as dedicated IPFS user
-- ZFS storage pool for optimal performance
-- Configurable API and gateway ports
-- Systemd service for automatic startup
-
-### Hippius Node
-- Runs as root user
-- Configured with off-chain worker support
-- Default substrate ports (configurable)
-- Systemd service for automatic startup
-- Automatic ED25519 key management:
-  - Uses provided key if specified in `hippius_key`
-  - Generates a secure ED25519 key if none provided
-  - Stores key in the network directory with proper permissions
-
-## Usage
-
-### Basic Deployment
-
-1. Configure your inventory in `inventory/hosts`:
-   ```
-   [ipfs_nodes]
-   your-server-ip-or-hostname
-   ```
-
-2. Review and adjust variables in `group_vars/all.yml`:
-   - IPFS configuration and ZFS settings
-   - Hippius binary location and ports
-
-3. Run the playbook:
-   ```bash
-   ansible-playbook -i inventory/production/hosts.yml site.yml -e "hippius_hotkey_mnemonic='YOUR SEED WORDS'"
-   ```
-
-### ZFS Configuration
-
-To use ZFS for IPFS storage, specify the available disks:
-
+#### Install ansible:
 ```bash
-ansible-playbook -i inventory/hosts site.yml -e "zfs_disks=['sdb','sdc']"
+sudo apt update
+sudo apt install python3-pip -y
+pip install ansible
 ```
 
-This creates a ZFS pool named "ipfs" using the specified disks.
-
-### Running Only Hippius Role
-
-To deploy or update only the Hippius node:
-
+#### Clone the storage miner repo:
 ```bash
-ansible-playbook -i inventory/hosts site.yml --tags hippius
+git clone https://github.com/thenervelab/hippius-storage-miner.git
 ```
 
-Or use the dedicated playbook:
-
+#### (Optional) Install mitogen for faster ansible runs:
 ```bash
-ansible-playbook -i inventory/hosts hippius.yml
+wget https://files.pythonhosted.org/packages/source/m/mitogen/mitogen-0.3.22.tar.gz
+tar -xzf mitogen-0.3.22.tar.gz
 ```
+##### Create `ansible.cfg` inside the repo directory and paste:
+```ini
+[defaults]
+strategy_plugins = /your/path/to/mitogen-0.3.22/ansible_mitogen/plugins/strategy
+strategy = mitogen_linear
+[ssh_connection]
+ssh_args = -o ControlMaster=auto -o ControlPersist=2m
+```
+**IMPORTANT:** Replace `/your/path/to/mitogen-0.3.22/...` to the actual directory
 
-### Updating Hippius Binary
+- **Your target hosts running Ubuntu 24.04 (with SSH access)**
+#### Server requirements:
+To run both the hippius blockchain node and IPFS with ZFS pools efficiently, your server should have:
+```
+CPU: 4 dedicated cores minimum (8+ recommended) - ZFS and substrate benefit from multithreading
+RAM: 16GB minimum (32GB+ recommended) - IPFS and ZFS use large memory caches
+Storage:
+    - 100GB+ SSD - System OS and chain data
+    - 2TB minimum (4TB+ recommended) - ZFS pools for IPFS
+        - NVME SSDs or Enterprise SSDs preferred, ZFS mirror or RAID-Z recommended
+Network:
+    - 1Gbps minimum, with at least 100Mbps sustained throughout
+    - Plan for 5-10TB+ of monthly traffic
 
-To update just the Hippius binary without changing configuration:
+More CPU and RAM improves chain sync, ARC cache efficiency and IPFS performance under load
+```
+**NOTE:** Since bittensor mining is a competitive, evolving game, these specs may become outdated at any time. It's your responsibility to research and optimise your infrastructure accordingly
 
+#### Create public/private key pairs:
 ```bash
-ansible-playbook -i inventory/hosts update_hippius.yml
+ssh-keygen
 ```
 
-### Upgrading to Hippius v2
-
-To perform a complete upgrade to Hippius v2, which includes stopping the service, updating the binary, and cleaning the database:
-
+#### Copy public key to your target hosts
 ```bash
-ansible-playbook -i inventory/hosts site.yml --tags upgrade-to-v2
+ssh-copy-id user@ip
 ```
 
-This upgrade process will:
-1. Stop the Hippius service
-2. Remove the existing chain databases (`frontier` and `paritydb`)
-3. Remove the existing Hippius binary
-4. Download the new Hippius v2 binary
-5. Update the service configuration
-6. Restart the Hippius service
+##### Or manually copy public key to the target hosts `~/.ssh/authorized_keys` file
 
-**Important**: This is a breaking change that will reset the node's database. Ensure you understand the implications before running this upgrade.
+## Updating configurations
+Once ansible is installed and we have SSH access to the target hosts, we need to configure some files inside the `hippius-storage-miner/` directory
 
-### Injecting HIPS Key for Storage Mining
-
-To inject your HIPS key for storage mining:
-
+#### Edit `hosts.yml` to define your target hosts:
 ```bash
-ansible-playbook -i inventory/hosts inject_keys.yml -e "hippius_hotkey_mnemonic='word1 word2 ... word12'"
+nano inventory/production/hosts.yml
 ```
+Replace `YOUR_VALI_IP` with the IP of your target host and `ansible_user: ubuntu` with a valid user e.g. `root`
 
-This will:
-1. Connect to the already running Hippius node
-2. Only inject the HIPS key required for storage mining
-3. Verify the key was injected correctly
+## Running the playbooks
+Once hosts.yml has been configured we can run the playbook to setup the target host automatically
 
-**Requirements:**
-- The Hippius node must be running with RPC enabled
-- No service interruption occurs during the key injection process
-
-**Important**: Always protect your mnemonic phrase! Use single quotes around it to prevent shell expansion issues.
-
-## Configuration
-
-### Important Variables
-
-```yaml
-# ZFS Configuration for IPFS
-zfs_disks: []  # Default empty, specify disk names like ['sdb','sdc']
-
-# IPFS Configuration
-ipfs_version: "v0.33.2"
-ipfs_user: ipfs
-ipfs_group: ipfs
-ipfs_home: /zfs/ipfs    # ZFS dataset mountpoint
-ipfs_data_dir: "{{ ipfs_home }}/data"
-ipfs_api_address: "/ip4/127.0.0.1/tcp/5001"
-ipfs_gateway_address: "/ip4/127.0.0.1/tcp/8080"
-
-# Hippius Configuration
-hippius_binary_url: "https://download.hippius.com/hippius"
-hippius_home: /opt/hippius
-hippius_data_dir: "{{ hippius_home }}/data"
-hippius_key: ""  # Optional: Provide an existing ED25519 key in hex format
-hippius_hotkey_mnemonic: ""  # Optional: Provide mnemonic for key injection
-hippius_ports:
-  rpc: 9944
-  p2p: 30333
-  ws: 9933
-hippius_node_name: "hippius-storage-miner"
-```
-
-## Security Notes
-
-- IPFS runs as a dedicated system user
-- Hippius validator runs as root (as required)
-- Firewall rules are automatically configured for all required ports
-
-## Maintenance
-
-### Service Management
-
+#### Run the main playbook:
 ```bash
-# IPFS
+ansible-playbook -i inventory/production/hosts.yml site.yml -e "hippius_hotkey_mnemonic='word1 word2 word3... word12'"
+```
+**IMPORTANT:** The playbook will automatically detect and format available disks. Make sure no important data is stored on unused disks before proceeding. Replace `'word1 word2 word3... word12'` with your bittensor hotkey seed phrase
+
+You can also configure this variable (and others like disks, ports, directories etc.) inside `group_vars/all.yml` if you'd rather not have them in your bash history and just run:
+```bash
+ansible-playbook -i inventory/production/hosts.yml site.yml
+```
+You can clear your bash history with:
+```bash
+history -c
+```
+
+#### Other playbooks:
+After running the main playbook, you usually won't need to run these other commands, but they're here if you ever want to do specific things like updating parts of your miner or checking IDs later on
+
+###### Viewing Node IDs:
+```bash
+ansible-playbook -i inventory/production/hosts.yml show_node_ids.yml
+```
+
+###### Updating only the hippius node:
+```bash
+ansible-playbook -i inventory/production/hosts.yml site.yml --tags hippius
+```
+
+###### Updating only the hippius binary:
+```bash
+ansible-playbook -i inventory/production/hosts.yml update_hippius.yml
+```
+
+###### Injecting HIPS keys:
+```bash
+ansible-playbook -i inventory/production/hosts.yml inject_keys.yml -e "hippius_hotkey_mnemonic='word1 word2 word3... word12'"
+```
+
+###### Updating IPFS storage configuration:
+```bash
+ansible-playbook -i inventory/production/hosts.yml site.yml --tags ipfs-storage-max
+```
+
+## Registering your first node on hippius network
+After setting up your storage node, you need to register it on the hippius blockchain to start participating in the network and earn rewards
+
+#### Access the substrate portal:
+https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Frpc.hippius.network#/extrinsics
+
+#### Import your bittensor hotkey wallet using the Polkadot{.js} extension
+**NOTE:** This is your coldkey on the hippius network
+
+#### Register using the extrinsic pallet `registration` → `registerNodeWithColdkey`:
+Change to the following and submit transaction:
+```
+nodeType: StorageMiner
+nodeId: <node id shown on ansible finish>
+payInCredits: No
+ipfsNodeId: <ipfs node id shown on ansible finish>
+```
+
+## Registering additional nodes on hippius network
+Once your first node is set up and registered, you can deploy additional nodes that are linked to your first node
+
+#### Create a new wallet using the Polkadot{.js} extension
+Copy and securely save the generated seed phrase, this wallet will act as the hotkey for your new node
+
+#### Run the ansible setup on the new target hosts
+**NOTE:** During setup, use the new wallet you just created (for `hippius_hotkey_mnemonic=`)
+
+#### Access the substrate portal:
+https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Frpc.hippius.network#/extrinsics
+
+#### Add the new wallet as a proxy using extrinisic pallet `proxy` → `addProxy`:
+Change to the following and submit transaction:
+```
+using the selected account: <select your coldkey>
+delegate: id
+Id: <select your new wallet>
+proxyType: NonTransfer
+delay: 0
+```
+**NOTE:** When you click Submit Transaction, uncheck "use a proxy for this call" on the popup page
+
+#### Transfer halpha from your coldkey to hotkey:
+In the top menu, go to "Accounts" then choose "Transfer", type in a _very very very_ small number and submit it. This is so it can sign the registration transaction
+
+#### Register using the extrinsic pallet `registration` → `registerNodeWithHotkey`:
+Change to the following and submit transaction:
+```
+using the selected account: <select your hotkey (new wallet)>
+coldkey: <select your coldkey>
+nodeType: StorageMiner
+nodeId: <node id shown on ansible finish>
+payInCredits: No
+ipfsNodeId: <ipfs node id shown on ansible finish>
+```
+**NOTE:** Do not use the IDs from your first node! Use the `nodeId` and `ipfsNodeId` generated by the ansible setup on the new host
+
+## Useful commands
+
+#### IPFS
+
+###### Check status:
+```bash
 systemctl status ipfs
-systemctl restart ipfs
+```
 
-# Hippius
+##### Restart:
+```bash
+systemctl restart ipfs
+```
+##### Check logs:
+```bash
+journalctl -u ipfs -f -n 100
+```
+
+#### Hippius
+
+###### Check status:
+```bash
 systemctl status hippius
+```
+
+##### Restart:
+```bash
 systemctl restart hippius
 ```
 
-### Viewing Node IDs
-
-To display both the Hippius node ID and IPFS node ID:
-
+##### Check logs:
 ```bash
-ansible-playbook -i inventory/hosts show_node_ids.yml
+journalctl -u hippius -f -n 100
 ```
 
-This command will output a formatted summary of node IDs that you can use for network identification and troubleshooting.
+#### ZFS Pool
 
-### ZFS Pool Management
-
+###### Check status:
 ```bash
-# Check ZFS pool status
 zpool status ipfs
+```
 
-# Check ZFS dataset space usage
+##### List space usage:
+```bash
 zfs list
+```
 
-# Scrub ZFS pool (recommended monthly)
+##### Scrub ZFS pool (recommended monthly):
+```bash
 zpool scrub ipfs
 ```
 
-## Troubleshooting
+## Common errors
 
-### Check service logs:
+#### IPFS not starting
+
+###### Check permissions:
 ```bash
-# IPFS logs
-journalctl -u ipfs -f
-
-# Hippius logs
-journalctl -u hippius -f
+ls -la /zfs/ipfs
 ```
 
-### Common Issues
-
-#### IPFS Not Starting
-- Check permissions: `ls -la /zfs/ipfs`
-- Verify ZFS mounts: `zfs list`
-- Check IPFS config: `cat /zfs/ipfs/data/config`
-
-#### Hippius Not Connecting to Network
-- Check bootnodes configuration
-- Verify firewall settings: `ufw status`
-- Check Hippius logs for specific errors
-
-## Task-specific Operations
-
-### Update IPFS Storage Configuration
-
-To update only the IPFS storage maximum size (particularly after adding disks to the ZFS pool):
-
+###### Verify ZFS mounts:
 ```bash
-ansible-playbook -i inventory/hosts site.yml --tags ipfs-storage-max
+zfs list
 ```
 
-This will detect the ZFS pool size and configure IPFS to use the maximum available storage.
+###### Check IPFS config:
+```bash
+cat /zfs/ipfs/data/config
+```
+
+#### Hippius not connecting to network
+
+###### Check bootnodes configuration
+```bash
+systemctl cat hippius
+```
+
+###### Verify firewall settings:
+```bash
+ufw status
+```
+
+###### Check hippius logs for errors:
+```bash
+journalctl -u hippius -f -n 100
+```
