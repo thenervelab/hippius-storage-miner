@@ -212,11 +212,11 @@ ipfsNodeId: <ipfs node id shown on ansible finish>
 systemctl status ipfs
 ```
 
-##### Restart:
+###### Restart:
 ```bash
 systemctl restart ipfs
 ```
-##### Check logs:
+###### Check logs:
 ```bash
 journalctl -u ipfs -f -n 100
 ```
@@ -228,12 +228,12 @@ journalctl -u ipfs -f -n 100
 systemctl status hippius
 ```
 
-##### Restart:
+###### Restart:
 ```bash
 systemctl restart hippius
 ```
 
-##### Check logs:
+###### Check logs:
 ```bash
 journalctl -u hippius -f -n 100
 ```
@@ -245,12 +245,12 @@ journalctl -u hippius -f -n 100
 zpool status ipfs
 ```
 
-##### List space usage:
+###### List space usage:
 ```bash
 zfs list
 ```
 
-##### Scrub ZFS pool (recommended monthly):
+###### Scrub ZFS pool (recommended monthly):
 ```bash
 zpool scrub ipfs
 ```
