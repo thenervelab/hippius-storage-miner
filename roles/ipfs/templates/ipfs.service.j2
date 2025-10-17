@@ -7,7 +7,7 @@ Type=simple
 User={{ ipfs_user }}
 Group={{ ipfs_group }}
 Environment=IPFS_PATH={{ ipfs_data_dir }}
-ExecStart=/usr/local/bin/ipfs daemon
+ExecStart=/usr/local/bin/ipfs daemon --migrate=true
 Restart=always
 RestartSec={{ service_restart_delay }}
 LimitNOFILE={{ service_nofile_limit }}

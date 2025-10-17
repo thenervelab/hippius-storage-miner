@@ -1,4 +1,37 @@
 ---
+# System tuning for IPFS
+- name: Configure system file descriptor limits
+  blockinfile:
+    path: /etc/security/limits.conf
+    block: |
+      * soft nofile 1048576
+      * hard nofile 1048576
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - IPFS limits"
+    create: yes
+  become: yes
+
+- name: Configure network tuning for IPFS
+  copy:
+    dest: /etc/sysctl.d/99-ipfs-tuning.conf
+    content: |
+      # Network tuning for IPFS
+      net.core.somaxconn = 4096
+      net.core.netdev_max_backlog = 250000
+      net.ipv4.tcp_fastopen = 3
+      net.ipv4.tcp_rmem = 4096 87380 134217728
+      net.ipv4.tcp_wmem = 4096 65536 134217728
+      net.core.rmem_max = 134217728
+      net.core.wmem_max = 134217728
+      net.ipv4.tcp_congestion_control = bbr
+    mode: '0644'
+  become: yes
+
+- name: Apply sysctl settings
+  command: sysctl --system
+  become: yes
+  changed_when: false
+
+# Install IPFS
 - name: Download Kubo IPFS
   get_url:
     url: "{{ ipfs_download_url }}"
@@ -113,17 +146,222 @@
   tags: 
     - ipfs-storage-max
 
-- name: Initialize IPFS
+- name: Set public IPv4 address from inventory
+  set_fact:
+    public_ipv4: "{{ inventory_hostname }}"
+
+- name: Get public IPv6 address
+  shell: ip -6 addr show scope global | grep -oP '(?<=inet6\s)[\da-f:]+' | head -1
+  register: public_ipv6_result
+  changed_when: false
+  failed_when: false
+
+- name: Set public IPv6 address if available
+  set_fact:
+    public_ipv6: "{{ public_ipv6_result.stdout }}"
+  when: public_ipv6_result.stdout is defined and public_ipv6_result.stdout != ""
+
+- name: Check if IPFS config exists
+  stat:
+    path: "{{ ipfs_data_dir }}/config"
+  register: ipfs_config_exists
+  become: yes
+
+- name: Backup existing IPFS identity if config exists
   shell: |
     export IPFS_PATH="{{ ipfs_data_dir }}"
-    if [ ! -f "$IPFS_PATH/config" ]; then
-      ipfs init --profile=server
-      ipfs config Addresses.API {{ ipfs_api_address }}
-      ipfs config Addresses.Gateway {{ ipfs_gateway_address }}
+    if [ -f "$IPFS_PATH/config" ]; then
+      # Backup the entire Identity section as JSON
+      jq '.Identity' "$IPFS_PATH/config" > /tmp/ipfs_identity_backup.json
+      echo "Identity backed up from config file"
+      cat /tmp/ipfs_identity_backup.json
     fi
   become: yes
-  args:
-    creates: "{{ ipfs_data_dir }}/config"
+  when: ipfs_config_exists.stat.exists
+  register: identity_backup
+  failed_when: false
+
+- name: Stop IPFS service before reinitializing
+  systemd:
+    name: ipfs
+    state: stopped
+  become: yes
+  when: ipfs_config_exists.stat.exists
+  ignore_errors: yes
+
+- name: Ensure IPFS daemon is not running
+  shell: |
+    # Kill any remaining IPFS processes
+    pkill -9 ipfs || true
+    # Wait for processes to die
+    sleep 3
+    # Remove lock file if it exists
+    rm -f {{ ipfs_data_dir }}/repo.lock
+    # Wait a bit more
+    sleep 2
+  become: yes
+  when: ipfs_config_exists.stat.exists
+
+- name: Remove old IPFS config to start fresh
+  file:
+    path: "{{ ipfs_data_dir }}/config"
+    state: absent
+  become: yes
+  when: ipfs_config_exists.stat.exists
+
+- name: Initialize IPFS with fresh config
+  shell: |
+    export IPFS_PATH="{{ ipfs_data_dir }}"
+    ipfs init --profile=server
+    ipfs config Addresses.API {{ ipfs_api_address }}
+    ipfs config Addresses.Gateway {{ ipfs_gateway_address }}
+  become: yes
+
+- name: Restore IPFS identity from backup
+  shell: |
+    export IPFS_PATH="{{ ipfs_data_dir }}"
+    if [ -f /tmp/ipfs_identity_backup.json ]; then
+      echo "Restoring identity from backup..."
+      
+      # Verify backup contains valid data
+      PEER_ID=$(jq -r '.PeerID' /tmp/ipfs_identity_backup.json)
+      echo "Original PeerID: $PEER_ID"
+      
+      # Directly replace the Identity section without going through shell variables
+      # This preserves the exact PrivKey without any escaping issues
+      jq --slurpfile identity /tmp/ipfs_identity_backup.json \
+        '.Identity = $identity[0]' \
+        "$IPFS_PATH/config" > "$IPFS_PATH/config.tmp"
+      
+      mv "$IPFS_PATH/config.tmp" "$IPFS_PATH/config"
+      
+      # Verify restoration
+      RESTORED_ID=$(jq -r '.Identity.PeerID' "$IPFS_PATH/config")
+      RESTORED_PRIV=$(jq -r '.Identity.PrivKey' "$IPFS_PATH/config")
+      ORIGINAL_PRIV=$(jq -r '.PrivKey' /tmp/ipfs_identity_backup.json)
+      
+      echo "Restored PeerID: $RESTORED_ID"
+      
+      if [ "$PEER_ID" = "$RESTORED_ID" ] && [ "$ORIGINAL_PRIV" = "$RESTORED_PRIV" ]; then
+        echo "✓ Identity (PeerID and PrivKey) restored successfully"
+      else
+        echo "✗ Identity restoration failed!"
+        echo "  PeerID match: $([ "$PEER_ID" = "$RESTORED_ID" ] && echo YES || echo NO)"
+        echo "  PrivKey match: $([ "$ORIGINAL_PRIV" = "$RESTORED_PRIV" ] && echo YES || echo NO)"
+        exit 1
+      fi
+      
+      # Cleanup
+      rm /tmp/ipfs_identity_backup.json
+    else
+      echo "No identity backup found - using newly generated identity"
+    fi
+  become: yes
+  when: ipfs_config_exists.stat.exists and identity_backup is defined
+
+- name: Create IPFS announce addresses configuration script
+  copy:
+    dest: /tmp/configure_ipfs_announce.sh
+    content: |
+      #!/bin/bash
+      export IPFS_PATH="{{ ipfs_data_dir }}"
+      PUBLIC_IPV4="{{ public_ipv4 }}"
+      {% if public_ipv6 is defined %}
+      PUBLIC_IPV6="{{ public_ipv6 }}"
+      {% endif %}
+      
+      # Build announce list
+      ANNOUNCE_LIST=""
+      
+      # Add IPv4 addresses
+      if [ -n "$PUBLIC_IPV4" ]; then
+        ANNOUNCE_LIST="$ANNOUNCE_LIST\"/ip4/$PUBLIC_IPV4/tcp/4001\","
+        ANNOUNCE_LIST="$ANNOUNCE_LIST\"/ip4/$PUBLIC_IPV4/udp/4001/quic\","
+        ANNOUNCE_LIST="$ANNOUNCE_LIST\"/ip4/$PUBLIC_IPV4/udp/4001/quic-v1\","
+        ANNOUNCE_LIST="$ANNOUNCE_LIST\"/ip4/$PUBLIC_IPV4/udp/4001/quic-v1/webtransport\","
+      fi
+      
+      # Add IPv6 addresses if available
+      {% if public_ipv6 is defined %}
+      if [ -n "$PUBLIC_IPV6" ]; then
+        ANNOUNCE_LIST="$ANNOUNCE_LIST\"/ip6/$PUBLIC_IPV6/tcp/4001\","
+        ANNOUNCE_LIST="$ANNOUNCE_LIST\"/ip6/$PUBLIC_IPV6/udp/4001/quic\","
+        ANNOUNCE_LIST="$ANNOUNCE_LIST\"/ip6/$PUBLIC_IPV6/udp/4001/quic-v1\","
+      fi
+      {% endif %}
+      
+      # Remove trailing comma and wrap in brackets
+      ANNOUNCE_LIST=$(echo "[$ANNOUNCE_LIST]" | sed 's/,]/]/')
+      
+      # Configure IPFS
+      ipfs config --json Addresses.Announce "$ANNOUNCE_LIST"
+      
+      # Configure NoAnnounce (private networks)
+      ipfs config --json Addresses.NoAnnounce "[
+        \"/ip4/10.0.0.0/ipcidr/8\",
+        \"/ip4/172.16.0.0/ipcidr/12\",
+        \"/ip4/192.168.0.0/ipcidr/16\",
+        \"/ip4/100.64.0.0/ipcidr/10\",
+        \"/ip4/169.254.0.0/ipcidr/16\",
+        \"/ip6/fc00::/ipcidr/7\",
+        \"/ip6/fe80::/ipcidr/10\"
+      ]"
+    mode: '0755'
+  become: yes
+
+- name: Configure IPFS to advertise public IP addresses
+  command: /tmp/configure_ipfs_announce.sh
+  become: yes
+  notify: Restart IPFS service
+
+- name: Display public IP configuration
+  debug:
+    msg: 
+      - "IPFS configured to announce:"
+      - "  IPv4: {{ public_ipv4 }}"
+      - "{% if public_ipv6 is defined %}  IPv6: {{ public_ipv6 }}{% else %}  IPv6: Not available{% endif %}"
+
+- name: Remove deprecated Reprovider configuration (Kubo 0.38+)
+  shell: |
+    export IPFS_PATH="{{ ipfs_data_dir }}"
+    # Remove deprecated Reprovider config to prevent FATAL errors
+    ipfs config --json Reprovider null
+  become: yes
+  ignore_errors: yes
+  changed_when: false
+
+- name: Configure IPFS performance and routing settings
+  shell: |
+    export IPFS_PATH="{{ ipfs_data_dir }}"
+    # Swarm configuration
+    ipfs config --json Swarm.DisableNatPortMap false
+    ipfs config --json Swarm.ConnMgr.LowWater 3000
+    ipfs config --json Swarm.ConnMgr.HighWater 5000
+    ipfs config Swarm.ConnMgr.GracePeriod 20s
+    
+    # Provider configuration
+    ipfs config --json Experimental.OptimisticProvide true
+    ipfs config Provide.Strategy pinned
+    ipfs config Provide.DHT.Interval 10m
+    ipfs config --json Provide.DHT.SweepEnabled true
+    
+    # Datastore performance tuning
+    ipfs config --json Datastore.BloomFilterSize 1048576
+    
+    # Note: Routing configuration is set by the index-provider role
+    # to enable custom routing with delegated HTTP provider
+  become: yes
+  notify: Restart IPFS service
+
+- name: Add Hippius IPFS bootstrap node
+  shell: |
+    export IPFS_PATH="{{ ipfs_data_dir }}"
+    # Check if bootstrap node is already added
+    if ! ipfs bootstrap list | grep -q "12D3KooWAtWvvmkeA6y7CAGXhRZMGKYJkHkG7LQAcGearpV4QwKG"; then
+      ipfs bootstrap add /dns4/ipfs-bootnode-1.hippius.network/tcp/4001/p2p/12D3KooWAtWvvmkeA6y7CAGXhRZMGKYJkHkG7LQAcGearpV4QwKG
+    fi
+  become: yes
+  notify: Restart IPFS service
 
 # Set IPFS StorageMax to ZFS pool size when using ZFS
 - name: Set IPFS StorageMax to ZFS pool size
@@ -134,7 +372,10 @@
     SIZE_VALUE=$(echo $SIZE_VALUE | sed 's/G$/GB/;s/T$/TB/;s/P$/PB/;s/E$/EB/')
     ipfs config Datastore.StorageMax "$SIZE_VALUE"
   become: yes
-  when: ((zfs_disks is defined and zfs_disks | length > 0) or (ipfs_pool_exists.rc == 0)) and zfs_pool_size.stdout is defined and zfs_pool_size.stdout != ""
+  when: 
+    - zfs_pool_size is defined
+    - zfs_pool_size.stdout is defined 
+    - zfs_pool_size.stdout != ""
   notify: Restart IPFS service
   tags: 
     - ipfs-storage-max
@@ -163,6 +404,22 @@
 - name: Enable and start IPFS service
   systemd:
     name: ipfs
+    state: started
+    enabled: yes
+  become: yes
+
+# HAProxy configuration for IPFS API optimization
+- name: Configure HAProxy for IPFS API
+  template:
+    src: haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    mode: '0644'
+  become: yes
+  notify: Restart HAProxy service
+
+- name: Enable and start HAProxy service
+  systemd:
+    name: haproxy
     state: started
     enabled: yes
   become: yes

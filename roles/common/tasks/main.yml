@@ -44,3 +44,93 @@
   ufw:
     state: enabled
     policy: deny
+
+# Rust installation for root user
+- name: Check if Rust is already installed
+  stat:
+    path: /root/.cargo/bin/rustc
+  register: rust_installed
+  become: yes
+
+- name: Download rustup installer
+  get_url:
+    url: https://sh.rustup.rs
+    dest: /tmp/rustup-init.sh
+    mode: '0755'
+  become: yes
+  when: not rust_installed.stat.exists
+
+- name: Install Rust with rustup (non-interactive)
+  shell: |
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+  args:
+    creates: /root/.cargo/bin/rustc
+  become: yes
+  environment:
+    RUSTUP_HOME: /root/.rustup
+    CARGO_HOME: /root/.cargo
+  when: not rust_installed.stat.exists
+
+- name: Add Rust to root's PATH in .bashrc
+  lineinfile:
+    path: /root/.bashrc
+    line: 'export PATH="$HOME/.cargo/bin:$PATH"'
+    create: yes
+    mode: '0644'
+  become: yes
+  when: not rust_installed.stat.exists
+
+- name: Verify Rust installation
+  shell: /root/.cargo/bin/rustc --version
+  register: rust_version
+  become: yes
+  changed_when: false
+  failed_when: false
+
+- name: Display Rust version
+  debug:
+    msg: "Rust installed: {{ rust_version.stdout }}"
+  when: rust_version.rc == 0
+
+# Hippius CLI installation
+- name: Install pipx for isolated Python CLI tools
+  apt:
+    name: pipx
+    state: present
+  become: yes
+
+- name: Ensure pipx path is configured
+  command: pipx ensurepath
+  become: yes
+  changed_when: false
+  failed_when: false
+
+- name: Check if hippius CLI is already installed
+  command: pipx list
+  register: pipx_list
+  become: yes
+  changed_when: false
+  failed_when: false
+
+- name: Install hippius CLI via pipx
+  command: pipx install hippius
+  become: yes
+  when: "'hippius' not in pipx_list.stdout"
+  register: hippius_cli_installed
+
+- name: Display hippius CLI installation status
+  debug:
+    msg: "Hippius CLI installed successfully and available system-wide"
+  when: hippius_cli_installed is changed
+
+- name: Verify hippius CLI installation
+  command: hippius --version
+  register: hippius_cli_version
+  become: yes
+  changed_when: false
+  failed_when: false
+
+- name: Display hippius CLI version
+  debug:
+    msg: "Hippius CLI version: {{ hippius_cli_version.stdout }}"
+  when: hippius_cli_version.rc == 0

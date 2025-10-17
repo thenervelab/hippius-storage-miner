@@ -46,6 +46,50 @@
     name: hippius
     state: started
     enabled: yes
+
+- name: Wait for Hippius node to be ready
+  wait_for:
+    port: "{{ hippius_ports.rpc }}"
+    delay: 5
+    timeout: 60
+  ignore_errors: yes
+
+- name: Retrieve Hippius node ID from RPC
+  uri:
+    url: "http://localhost:{{ hippius_ports.rpc }}/"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      id: 1
+      method: "system_localPeerId"
+    return_content: yes
+  register: hippius_node_id_result
+  until: hippius_node_id_result.status == 200
+  retries: 10
+  delay: 3
+  ignore_errors: yes
+
+- name: Set Hippius node ID fact from RPC
+  set_fact:
+    hippius_node_id: "{{ hippius_node_id_result.json.result }}"
+  when: hippius_node_id_result is defined and hippius_node_id_result.json is defined and hippius_node_id_result.json.result is defined
+
+- name: Fallback - Get Hippius node ID from key file
+  command: "{{ hippius_binary_path }}/{{ hippius_binary_name }} key inspect-node-key --file {{ hippius_key_path }}"
+  register: hippius_node_id_fallback
+  when: hippius_node_id is not defined
+  ignore_errors: yes
+
+- name: Set Hippius node ID fact from key file
+  set_fact:
+    hippius_node_id: "{{ hippius_node_id_fallback.stdout | trim }}"
+  when: hippius_node_id is not defined and hippius_node_id_fallback is defined and hippius_node_id_fallback.rc == 0
+
+- name: Display Hippius node ID
+  debug:
+    msg: "Hippius Node ID: {{ hippius_node_id }}"
+  when: hippius_node_id is defined
   
 # Include key injection tasks if mnemonic is provided
 - name: Include key injection tasks

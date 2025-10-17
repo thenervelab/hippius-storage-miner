@@ -1,0 +1,173 @@
+---
+# IPNI Index Provider installation and configuration
+
+- name: Install Go (required for building index-provider)
+  apt:
+    name: golang-go
+    state: present
+  become: yes
+
+- name: Check if provider binary exists
+  stat:
+    path: "{{ index_provider_binary_path }}"
+  register: provider_binary_exists
+
+- name: Install index-provider binary
+  shell: |
+    export PATH="/root/.cargo/bin:$PATH"
+    export GOBIN=/usr/local/bin
+    GO111MODULE=on go install github.com/ipni/index-provider/cmd/provider@latest
+  args:
+    creates: "{{ index_provider_binary_path }}"
+  become: yes
+  environment:
+    GOBIN: /usr/local/bin
+    GO111MODULE: "on"
+  when: not provider_binary_exists.stat.exists
+  register: provider_installed
+
+- name: Verify provider installation
+  command: "{{ index_provider_binary_path }} version"
+  register: provider_version
+  become: yes
+  changed_when: false
+  failed_when: false
+
+- name: Display provider version
+  debug:
+    msg: "Index provider version: {{ provider_version.stdout }}"
+  when: provider_version.rc == 0
+
+- name: Get IPFS peer ID
+  shell: |
+    export IPFS_PATH="{{ ipfs_data_dir }}"
+    ipfs id -f '<id>\n'
+  register: ipfs_peer_id
+  become: yes
+  changed_when: false
+
+- name: Display IPFS peer ID
+  debug:
+    msg: "IPFS Peer ID: {{ ipfs_peer_id.stdout }}"
+
+- name: Initialize provider repo
+  command: "{{ index_provider_binary_path }} init"
+  become: yes
+  environment:
+    PROVIDER_PATH: "{{ index_provider_repo_path }}"
+  args:
+    creates: "{{ index_provider_repo_path }}/config"
+
+- name: Read existing index-provider config
+  slurp:
+    src: "{{ index_provider_repo_path }}/config"
+  register: provider_config_content
+  become: yes
+
+- name: Parse and update index-provider config
+  set_fact:
+    provider_config: "{{ provider_config_content.content | b64decode | from_json }}"
+
+- name: Update DelegatedRouting configuration
+  set_fact:
+    provider_config: "{{ provider_config | combine({
+      'DelegatedRouting': {
+        'ListenMultiaddr': index_provider_listen_multiaddr,
+        'ProviderID': ipfs_peer_id.stdout,
+        'Addrs': []
+      },
+      'DirectAnnounce': {
+        'URLs': index_provider_http_announce_urls
+      }
+    }, recursive=True) }}"
+
+- name: Write updated index-provider config
+  copy:
+    content: "{{ provider_config | to_nice_json }}"
+    dest: "{{ index_provider_repo_path }}/config"
+    mode: '0644'
+  become: yes
+  notify: Restart index-provider
+
+- name: Create index-provider systemd service
+  template:
+    src: index-provider.service.j2
+    dest: /etc/systemd/system/index-provider.service
+    mode: '0644'
+  become: yes
+  notify: Restart index-provider
+
+- name: Configure UFW for index-provider delegated routing
+  ufw:
+    rule: allow
+    port: "{{ index_provider_port }}"
+    proto: tcp
+  become: yes
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes
+  become: yes
+
+- name: Enable and start index-provider service
+  systemd:
+    name: index-provider
+    state: started
+    enabled: yes
+  become: yes
+
+- name: Configure Kubo to use index-provider for delegated routing
+  shell: |
+    export IPFS_PATH="{{ ipfs_data_dir }}"
+    
+    # Set custom routing
+    ipfs config Routing.Type custom
+    
+    # Configure routers
+    ipfs config --json Routing.Routers '{
+      "Delegate": {
+        "Type": "http",
+        "Parameters": {
+          "Endpoint": "http://127.0.0.1:{{ index_provider_port }}",
+          "MaxProvideBatchSize": 100,
+          "MaxProvideConcurrency": 96
+        }
+      },
+      "WanDHT": {
+        "Type": "dht",
+        "Parameters": {
+          "Mode": "server",
+          "PublicIPNetwork": true
+        }
+      },
+      "ParallelProvide": {
+        "Type": "parallel",
+        "Parameters": {
+          "Routers": [
+            {"RouterName": "Delegate", "Timeout": "1m30s", "IgnoreErrors": true},
+            {"RouterName": "WanDHT", "Timeout": "1m30s", "IgnoreErrors": false}
+          ]
+        }
+      }
+    }'
+    
+    # Configure routing methods
+    ipfs config --json Routing.Methods '{
+      "provide": {"RouterName": "ParallelProvide"},
+      "find-providers": {"RouterName": "WanDHT"},
+      "find-peers": {"RouterName": "WanDHT"},
+      "get-ipns": {"RouterName": "WanDHT"},
+      "put-ipns": {"RouterName": "WanDHT"}
+    }'
+  become: yes
+  notify: Restart IPFS service
+
+- name: Display index-provider setup complete
+  debug:
+    msg: |
+      Index-provider configured successfully!
+      - Delegated routing endpoint: http://127.0.0.1:{{ index_provider_port }}
+      - Admin API: http://127.0.0.1:{{ index_provider_admin_port }}/health
+      - IPFS Peer ID: {{ ipfs_peer_id.stdout }}
+      - HTTP Announce URLs: {{ index_provider_http_announce_urls | join(', ') }}
+

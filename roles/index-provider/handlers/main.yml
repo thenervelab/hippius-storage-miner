@@ -1,0 +1,15 @@
+---
+# Handlers for index-provider
+
+- name: Restart index-provider
+  systemd:
+    name: index-provider
+    state: restarted
+  become: yes
+
+- name: Restart IPFS service
+  systemd:
+    name: ipfs
+    state: restarted
+  become: yes
+

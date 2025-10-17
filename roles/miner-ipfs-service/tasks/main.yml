@@ -1,0 +1,106 @@
+---
+# Miner IPFS Service installation and configuration
+
+- name: Install build dependencies for Rust miner service
+  apt:
+    name:
+      - git
+      - pkg-config
+      - libssl-dev
+      - build-essential
+    state: present
+  become: yes
+
+- name: Check if miner service binary already exists
+  stat:
+    path: "{{ miner_service_install_dir }}/miner-ipfs-service"
+  register: miner_binary_exists
+
+- name: Clone rust-miner-ipfs-service repository
+  git:
+    repo: "{{ miner_service_repo }}"
+    dest: "{{ miner_service_build_dir }}"
+    version: main
+    force: yes
+  become: yes
+  when: not miner_binary_exists.stat.exists
+
+- name: Build rust-miner-ipfs-service (this may take several minutes)
+  shell: |
+    export PATH="/root/.cargo/bin:$PATH"
+    cd {{ miner_service_build_dir }}
+    cargo build --release
+  args:
+    creates: "{{ miner_service_build_dir }}/target/release/miner-ipfs-service"
+  become: yes
+  environment:
+    CARGO_HOME: /root/.cargo
+    RUSTUP_HOME: /root/.rustup
+  when: not miner_binary_exists.stat.exists
+  register: cargo_build
+  async: 1800  # 30 minutes timeout
+  poll: 10     # Check every 10 seconds
+
+- name: Display build status
+  debug:
+    msg: "Rust miner service built successfully"
+  when: cargo_build is changed
+
+- name: Create miner service installation directory
+  file:
+    path: "{{ miner_service_install_dir }}"
+    state: directory
+    mode: '0755'
+  become: yes
+
+- name: Create miner service database directory
+  file:
+    path: "{{ miner_service_db_path }}"
+    state: directory
+    mode: '0755'
+  become: yes
+
+- name: Copy miner service binary to installation directory
+  copy:
+    src: "{{ miner_service_build_dir }}/target/release/miner-ipfs-service"
+    dest: "{{ miner_service_install_dir }}/miner-ipfs-service"
+    mode: '0755'
+    remote_src: yes
+  become: yes
+  when: not miner_binary_exists.stat.exists
+
+- name: Create miner service configuration
+  template:
+    src: config.toml.j2
+    dest: "{{ miner_service_install_dir }}/config.toml"
+    mode: '0644'
+  become: yes
+  notify: Restart miner-ipfs-service
+
+- name: Create miner service systemd unit
+  template:
+    src: miner-ipfs-service.service.j2
+    dest: /etc/systemd/system/miner-ipfs-service.service
+    mode: '0644'
+  become: yes
+  notify: Restart miner-ipfs-service
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes
+  become: yes
+
+- name: Enable and start miner-ipfs-service
+  systemd:
+    name: miner-ipfs-service
+    state: started
+    enabled: yes
+  become: yes
+
+- name: Clean up build directory
+  file:
+    path: "{{ miner_service_build_dir }}"
+    state: absent
+  become: yes
+  when: cargo_build is changed
+

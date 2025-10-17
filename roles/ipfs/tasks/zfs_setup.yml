@@ -1,5 +1,5 @@
 ---
-# ZFS pool setup for IPFS data
+# ZFS pool setup for IPFS data with optimizations
 - name: Install ZFS dependencies
   package:
     name:
@@ -7,55 +7,221 @@
     state: present
   become: yes
 
-- name: Check if ZFS pool already exists
-  shell: zpool list | grep -q "^ipfs "
-  register: zfs_pool_exists
+- name: Get total system RAM in bytes
+  shell: grep MemTotal /proc/meminfo | awk '{print $2 * 1024}'
+  register: total_ram_bytes
+  changed_when: false
+
+- name: Calculate ZFS ARC max (75% of RAM)
+  set_fact:
+    zfs_arc_max_bytes: "{{ (total_ram_bytes.stdout | int * 0.75) | int }}"
+
+- name: Display ARC configuration
+  debug:
+    msg: "Setting ZFS ARC max to {{ (zfs_arc_max_bytes | int / 1024 / 1024 / 1024) | round(2) }} GB (75% of {{ (total_ram_bytes.stdout | int / 1024 / 1024 / 1024) | round(2) }} GB total RAM)"
+
+- name: Configure ZFS ARC max (persistent)
+  lineinfile:
+    path: /etc/modprobe.d/zfs-arc-max.conf
+    line: "options zfs zfs_arc_max={{ zfs_arc_max_bytes }}"
+    create: yes
+    mode: '0644'
+  become: yes
+
+- name: Update initramfs
+  command: update-initramfs -u
+  become: yes
+  when: zfs_arc_max_bytes is defined
+
+- name: Apply ZFS ARC max immediately
+  shell: echo {{ zfs_arc_max_bytes }} > /sys/module/zfs/parameters/zfs_arc_max
+  become: yes
+  when: zfs_arc_max_bytes is defined
+  ignore_errors: yes
+
+- name: Set NVMe scheduler to none for better ZFS performance
+  shell: |
+    for d in {{ zfs_disks | map('basename') | join(' ') }}; do
+      if [ -f /sys/block/$d/queue/scheduler ]; then
+        echo none > /sys/block/$d/queue/scheduler
+      fi
+    done
+  become: yes
+  when: 
+    - zfs_disks is defined and zfs_disks | length > 0
+  ignore_errors: yes
+
+- name: Make NVMe scheduler setting persistent via udev rule
+  copy:
+    dest: /etc/udev/rules.d/60-scheduler-zfs.rules
+    content: |
+      # Set scheduler to none for NVMe devices used by ZFS
+      {% for disk in zfs_disks %}
+      ACTION=="add|change", KERNEL=="{{ disk | basename }}", ATTR{queue/scheduler}="none"
+      {% endfor %}
+    mode: '0644'
+  become: yes
+  when: 
+    - zfs_disks is defined and zfs_disks | length > 0
+
+- name: Enable and start fstrim timer for weekly TRIM
+  systemd:
+    name: fstrim.timer
+    enabled: yes
+    state: started
+  become: yes
+
+- name: Check if IPFS directory is already on ZFS
+  shell: df -T /var/lib/ipfs 2>/dev/null | grep -q zfs
+  register: ipfs_on_zfs
   failed_when: false
   changed_when: false
   become: yes
 
-- name: Create ZFS pool for IPFS
-  command: zpool create ipfs {{ zfs_disks | join(' ') }}
+- name: Get existing ZFS dataset name if IPFS is on ZFS
+  shell: df /var/lib/ipfs 2>/dev/null | tail -1 | awk '{print $1}'
+  register: existing_zfs_dataset
+  when: ipfs_on_zfs.rc == 0
+  changed_when: false
+  become: yes
+
+- name: Check if ZFS pool 'ipfs' already exists
+  shell: zpool list -H ipfs 2>/dev/null
+  register: zfs_pool_exists
+  failed_when: false
+  changed_when: false
+  become: yes
+  when: ipfs_on_zfs.rc != 0
+
+- name: Display ZFS status
+  debug:
+    msg: "{{ 'IPFS directory is already on ZFS (' + existing_zfs_dataset.stdout + ') - skipping ZFS setup' if ipfs_on_zfs.rc == 0 else ('ZFS pool ipfs exists - skipping creation' if zfs_pool_exists.rc == 0 else 'Will create new ZFS pool named ipfs') }}"
+  when: zfs_disks is defined and zfs_disks | length > 0
+
+- name: Create optimized ZFS pool for IPFS
+  command: >
+    zpool create -f
+    -o ashift=12
+    -o autotrim=on
+    -O atime=off
+    -O xattr=sa
+    -O acltype=posixacl
+    -O compression=zstd
+    -O recordsize=256K
+    -O logbias=throughput
+    -O redundant_metadata=most
+    ipfs
+    {{ zfs_disks | join(' ') }}
   become: yes
   when: 
     - zfs_disks is defined and zfs_disks | length > 0
+    - ipfs_on_zfs.rc != 0
     - zfs_pool_exists.rc != 0
 
-- name: Ensure parent ZFS directory exists
-  file:
-    path: "/zfs"
-    state: directory
-    mode: '0755'
+- name: Check pool status
+  command: zpool status -v ipfs
+  register: zpool_status
   become: yes
-  when: zfs_disks is defined and zfs_disks | length > 0
+  when: 
+    - zfs_disks is defined and zfs_disks | length > 0
+    - ipfs_on_zfs.rc != 0
 
-- name: Create ZFS dataset for IPFS home
-  zfs:
-    name: ipfs/ipfs_home
-    state: present
-    extra_zfs_properties:
-      mountpoint: "{{ ipfs_home }}"
+- name: Display ZFS pool status
+  debug:
+    var: zpool_status.stdout_lines
+  when: 
+    - zfs_disks is defined and zfs_disks | length > 0
+    - ipfs_on_zfs.rc != 0
+
+- name: Check if ipfs/repo dataset exists
+  shell: zfs list -H ipfs/repo
+  register: ipfs_repo_exists
   become: yes
-  when: zfs_disks is defined and zfs_disks | length > 0
+  changed_when: false
+  failed_when: false
+  when: 
+    - zfs_disks is defined and zfs_disks | length > 0
+    - ipfs_on_zfs.rc != 0
 
-- name: Create ZFS dataset for IPFS data
-  zfs:
-    name: ipfs/ipfs_data
-    state: present
-    extra_zfs_properties:
-      mountpoint: "{{ ipfs_data_dir }}"
+- name: Create ZFS dataset for IPFS repo
+  command: zfs create ipfs/repo
   become: yes
-  when: zfs_disks is defined and zfs_disks | length > 0
+  when: 
+    - zfs_disks is defined and zfs_disks | length > 0
+    - ipfs_on_zfs.rc != 0
+    - ipfs_repo_exists.rc != 0
 
-- name: Set appropriate ownership for ZFS mount points
+- name: Set mountpoint for ipfs/repo
+  command: zfs set mountpoint=/var/lib/ipfs ipfs/repo
+  become: yes
+  when: 
+    - zfs_disks is defined and zfs_disks | length > 0
+    - ipfs_on_zfs.rc != 0
+    - ipfs_repo_exists.rc != 0
+
+- name: Check if ipfs/repo/blocks dataset exists
+  shell: zfs list -H ipfs/repo/blocks
+  register: ipfs_blocks_exists
+  become: yes
+  changed_when: false
+  failed_when: false
+  when: 
+    - zfs_disks is defined and zfs_disks | length > 0
+    - ipfs_on_zfs.rc != 0
+
+- name: Create ZFS dataset for IPFS blocks
+  command: zfs create ipfs/repo/blocks
+  become: yes
+  when: 
+    - zfs_disks is defined and zfs_disks | length > 0
+    - ipfs_on_zfs.rc != 0
+    - ipfs_blocks_exists.rc != 0
+
+- name: Set mountpoint for ipfs/repo/blocks
+  command: zfs set mountpoint=/var/lib/ipfs/blocks ipfs/repo/blocks
+  become: yes
+  when: 
+    - zfs_disks is defined and zfs_disks | length > 0
+    - ipfs_on_zfs.rc != 0
+    - ipfs_blocks_exists.rc != 0
+
+- name: Set primarycache=metadata for blocks dataset
+  command: zfs set primarycache=metadata ipfs/repo/blocks
+  become: yes
+  when: 
+    - zfs_disks is defined and zfs_disks | length > 0
+    - ipfs_on_zfs.rc != 0
+
+- name: Set appropriate ownership for IPFS directories
   file:
     path: "{{ item }}"
     owner: "{{ ipfs_user }}"
     group: "{{ ipfs_group }}"
     state: directory
     mode: '0755'
+    recurse: no
   loop:
-    - "{{ ipfs_home }}"
-    - "{{ ipfs_data_dir }}"
+    - /var/lib/ipfs
+    - /var/lib/ipfs/blocks
+  become: yes
+  when: zfs_disks is defined and zfs_disks | length > 0
+
+- name: Create ZFS scrub script
+  copy:
+    dest: /usr/local/sbin/zpool-scrub-ipfs
+    content: |
+      #!/bin/bash
+      zpool scrub ipfs
+    mode: '0755'
+  become: yes
+  when: zfs_disks is defined and zfs_disks | length > 0
+
+- name: Setup monthly ZFS scrub cron job
+  copy:
+    dest: /etc/cron.d/zpool-scrub-ipfs
+    content: |
+      # Monthly ZFS scrub for ipfs pool (1st of month at 3 AM)
+      0 3 1 * * root /usr/local/sbin/zpool-scrub-ipfs
+    mode: '0644'
   become: yes
   when: zfs_disks is defined and zfs_disks | length > 0 

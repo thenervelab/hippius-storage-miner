@@ -1,0 +1,9 @@
+---
+# Handlers for miner-ipfs-service
+
+- name: Restart miner-ipfs-service
+  systemd:
+    name: miner-ipfs-service
+    state: restarted
+  become: yes
+

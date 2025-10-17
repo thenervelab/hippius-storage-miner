@@ -5,4 +5,10 @@
   systemd:
     name: ipfs
     state: restarted
+  become: yes
+
+- name: Restart HAProxy service
+  systemd:
+    name: haproxy
+    state: restarted
   become: yes 

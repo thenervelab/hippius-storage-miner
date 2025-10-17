@@ -1,0 +1,15 @@
+{
+  "DelegatedRouting": {
+    "ListenMultiaddr": "{{ index_provider_listen_multiaddr }}",
+    "ProviderID": "{{ ipfs_peer_id.stdout }}",
+    "Addrs": []
+  },
+  "DirectAnnounce": {
+    "URLs": [
+{% for url in index_provider_http_announce_urls %}
+      "{{ url }}"{{ "," if not loop.last else "" }}
+{% endfor %}
+    ]
+  }
+}
+

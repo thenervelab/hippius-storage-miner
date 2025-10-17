@@ -3,6 +3,7 @@
 ## Table of Contents
 
 - [Overview](#overview)
+  - [Deployed Services](#deployed-services)
 - [What you need before we start](#what-you-need-before-we-start)
   - [Install ansible](#install-ansible)
   - [Clone the storage miner repo](#clone-the-storage-miner-repo)
@@ -17,20 +18,65 @@
 - [Registering your first node](#registering-your-first-node-on-hippius-network)
 - [Registering additional nodes](#registering-additional-nodes-on-hippius-network)
 - [Useful commands](#useful-commands)
+  - [Service Management](#service-management)
   - [IPFS](#ipfs)
   - [Hippius](#hippius)
+  - [HAProxy](#haproxy)
+  - [Index Provider (IPNI)](#index-provider-ipni)
+  - [Rust Miner IPFS Service](#rust-miner-ipfs-service)
   - [ZFS Pool](#zfs-pool)
 - [Common errors](#common-errors)
   - [IPFS not starting](#ipfs-not-starting)
   - [Hippius not connecting](#hippius-not-connecting-to-network)
+  - [Index Provider not announcing CIDs](#index-provider-not-announcing-cids)
+  - [Miner IPFS Service not pinning](#miner-ipfs-service-not-pinning)
+  - [HAProxy returning errors](#haproxy-returning-errors)
+  - [ZFS performance issues](#zfs-performance-issues)
 
 ## Overview
-This guide helps you deploy a storage miner using IPFS for decentralised storage, backed by ZFS for reliable disk management and register it on the hippius network
+This guide helps you deploy a storage miner using IPFS for decentralised storage, backed by ZFS for reliable disk management and register it on the hippius network.
 
 By the end of this setup, you'll have:
 - A machine (local or VM) with ansible installed and configured
-- A target host fully set up
+- A target host fully set up with all required services
 - A registered storage miner on the hippius network
+
+### Deployed Services
+
+The playbook automatically installs and configures the following services:
+
+1. **Hippius Node** - Substrate blockchain node for the Hippius network
+   - Runs with warp sync for fast synchronization
+   - Manages on-chain miner registration and rewards
+   - Service: `hippius.service`
+
+2. **IPFS (Kubo)** - Decentralized storage layer
+   - Version: 0.38.1
+   - API Port: 5002 (backend)
+   - Gateway Port: 8080
+   - Service: `ipfs.service`
+
+3. **HAProxy** - IPFS API proxy and optimizer
+   - Proxies port 5001 → 5002
+   - Optimizes `/api/v0/repo/stat` calls with `?size-only=true`
+   - Service: `haproxy.service`
+
+4. **Index Provider (IPNI)** - Fast content discovery
+   - Announces CIDs to `cid.contact` for instant discoverability
+   - Delegated routing on port 50617
+   - Admin API on port 3102
+   - Service: `index-provider.service`
+
+5. **Rust Miner IPFS Service** - Automated content management
+   - Fetches miner profiles from Hippius chain
+   - Automatically pins assigned CIDs
+   - Manages IPFS garbage collection
+   - Service: `miner-ipfs-service.service`
+
+6. **ZFS** (optional) - Enterprise-grade storage
+   - Optimized for IPFS workloads
+   - Automatic compression, checksumming, and TRIM
+   - Monthly scrubs for data integrity
 
 ## What you need before we start
 - **A local machine (Ubuntu or WSL2 on Windows) or a small VM running Ubuntu. This is where you will run the setup commands using ansible**
@@ -205,6 +251,13 @@ ipfsNodeId: <ipfs node id shown on ansible finish>
 
 ## Useful commands
 
+### Service Management
+
+#### Check all storage miner services:
+```bash
+systemctl status hippius ipfs haproxy index-provider miner-ipfs-service
+```
+
 #### IPFS
 
 ###### Check status:
@@ -216,9 +269,25 @@ systemctl status ipfs
 ```bash
 systemctl restart ipfs
 ```
+
 ###### Check logs:
 ```bash
 journalctl -u ipfs -f -n 100
+```
+
+###### Get IPFS peer ID:
+```bash
+ipfs id
+```
+
+###### Check IPFS repo stats:
+```bash
+ipfs repo stat
+```
+
+###### Check connected peers:
+```bash
+ipfs swarm peers | wc -l
 ```
 
 #### Hippius
@@ -238,11 +307,78 @@ systemctl restart hippius
 journalctl -u hippius -f -n 100
 ```
 
+###### Get node peer ID:
+```bash
+curl -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"system_localPeerId"}' http://localhost:9944
+```
+
+#### HAProxy
+
+###### Check status:
+```bash
+systemctl status haproxy
+```
+
+###### Test IPFS API through HAProxy:
+```bash
+curl http://localhost:5001/api/v0/repo/stat
+```
+
+#### Index Provider (IPNI)
+
+###### Check status:
+```bash
+systemctl status index-provider
+```
+
+###### Check logs:
+```bash
+journalctl -u index-provider -f -n 100
+```
+
+###### Check provider stats:
+```bash
+curl http://localhost:3102/stats
+```
+
+###### Check provider health:
+```bash
+curl http://localhost:3102/health
+```
+
+###### Verify CID announcements to cid.contact:
+```bash
+# Check if your CIDs are indexed (replace YOUR_CID with an actual CID you've pinned)
+curl "https://cid.contact/cid/YOUR_CID"
+```
+
+#### Rust Miner IPFS Service
+
+###### Check status:
+```bash
+systemctl status miner-ipfs-service
+```
+
+###### Restart:
+```bash
+systemctl restart miner-ipfs-service
+```
+
+###### Check logs:
+```bash
+journalctl -u miner-ipfs-service -f -n 100
+```
+
+###### Monitor pinning activity:
+```bash
+journalctl -u miner-ipfs-service -f | grep -i "pin"
+```
+
 #### ZFS Pool
 
 ###### Check status:
 ```bash
-zpool status ipfs
+zpool status
 ```
 
 ###### List space usage:
@@ -250,9 +386,19 @@ zpool status ipfs
 zfs list
 ```
 
+###### Check ZFS ARC cache stats:
+```bash
+arc_summary | head -20
+```
+
 ###### Scrub ZFS pool (recommended monthly):
 ```bash
 zpool scrub ipfs
+```
+
+###### Check scrub status:
+```bash
+zpool status -v ipfs
 ```
 
 ## Common errors
@@ -261,22 +407,31 @@ zpool scrub ipfs
 
 ###### Check permissions:
 ```bash
-ls -la /zfs/ipfs
+ls -la /var/lib/ipfs
 ```
 
-###### Verify ZFS mounts:
+###### Verify ZFS mounts (if using ZFS):
 ```bash
 zfs list
+df -h /var/lib/ipfs
 ```
 
 ###### Check IPFS config:
 ```bash
-cat /zfs/ipfs/data/config
+cat /var/lib/ipfs/config | jq .
+```
+
+###### Check if IPFS daemon is locked:
+```bash
+# If you see "repo.lock" errors, stop the service and remove lock
+systemctl stop ipfs
+rm -f /var/lib/ipfs/repo.lock
+systemctl start ipfs
 ```
 
 #### Hippius not connecting to network
 
-###### Check bootnodes configuration
+###### Check bootnodes configuration:
 ```bash
 systemctl cat hippius
 ```
@@ -289,4 +444,113 @@ ufw status
 ###### Check hippius logs for errors:
 ```bash
 journalctl -u hippius -f -n 100
+```
+
+###### Check if RPC is responding:
+```bash
+curl -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"system_health"}' http://localhost:9944
+```
+
+#### Index Provider not announcing CIDs
+
+###### Check if provider is running:
+```bash
+systemctl status index-provider
+journalctl -u index-provider -n 50
+```
+
+###### Verify provider config:
+```bash
+cat /root/.index-provider/config | jq .
+```
+
+###### Check IPFS routing configuration:
+```bash
+export IPFS_PATH=/var/lib/ipfs
+ipfs config Routing.Type
+ipfs config Routing.Routers
+```
+
+###### Test provider endpoint:
+```bash
+curl http://localhost:50617/
+curl http://localhost:3102/health
+```
+
+###### Verify provides are being sent:
+```bash
+# Pin a test file and watch for announces
+echo "test" | ipfs add
+journalctl -u index-provider -f | grep -i "announce"
+```
+
+#### Miner IPFS Service not pinning
+
+###### Check service status:
+```bash
+systemctl status miner-ipfs-service
+journalctl -u miner-ipfs-service -n 100
+```
+
+###### Verify configuration:
+```bash
+cat /opt/hippius/miner-ipfs-service/config.toml
+```
+
+###### Check if Hippius node ID is correct:
+```bash
+# In config.toml, miner_profile_id should match your Hippius peer ID
+curl -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"system_localPeerId"}' http://localhost:9944
+```
+
+###### Test IPFS connectivity:
+```bash
+# Service uses port 5002 (backend)
+curl http://localhost:5002/api/v0/id
+```
+
+#### HAProxy returning errors
+
+###### Check HAProxy status:
+```bash
+systemctl status haproxy
+journalctl -u haproxy -n 50
+```
+
+###### Verify backend is accessible:
+```bash
+# HAProxy proxies 5001 → 5002
+curl http://localhost:5002/api/v0/version
+curl http://localhost:5001/api/v0/version
+```
+
+###### Check HAProxy configuration:
+```bash
+cat /etc/haproxy/haproxy.cfg
+haproxy -c -f /etc/haproxy/haproxy.cfg  # Validate config
+```
+
+#### ZFS performance issues
+
+###### Check ARC cache hit rate:
+```bash
+arc_summary | grep "Hit Rate"
+```
+
+###### Check if ARC is properly sized:
+```bash
+# Should be ~75% of total RAM
+cat /etc/modprobe.d/zfs.conf
+cat /sys/module/zfs/parameters/zfs_arc_max
+```
+
+###### Check disk I/O:
+```bash
+zpool iostat -v 5
+```
+
+###### Verify NVMe scheduler is set to 'none':
+```bash
+cat /sys/block/nvme*/queue/scheduler
+# Should show: [none] mq-deadline kyber
 ```

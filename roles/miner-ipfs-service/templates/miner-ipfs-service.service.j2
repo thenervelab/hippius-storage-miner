@@ -1,0 +1,17 @@
+[Unit]
+Description=Rust Miner IPFS Service
+After=network-online.target ipfs.service hippius.service
+Wants=network-online.target
+Requires=ipfs.service hippius.service
+
+[Service]
+Type=simple
+WorkingDirectory={{ miner_service_install_dir }}
+ExecStart={{ miner_service_install_dir }}/miner-ipfs-service run
+Restart=on-failure
+RestartSec=5
+Environment=RUST_LOG=info,miner_ipfs_service=debug
+
+[Install]
+WantedBy=multi-user.target
+

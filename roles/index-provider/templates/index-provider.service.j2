@@ -1,0 +1,20 @@
+[Unit]
+Description=IPNI index-provider daemon
+After=network-online.target ipfs.service
+Wants=network-online.target
+Requires=ipfs.service
+
+[Service]
+Type=simple
+User=root
+Environment=PROVIDER_PATH={{ index_provider_repo_path }}
+ExecStart={{ index_provider_binary_path }} daemon
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+

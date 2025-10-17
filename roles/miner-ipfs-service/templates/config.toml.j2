@@ -1,0 +1,40 @@
+[service]
+poll_interval_secs = {{ miner_service_poll_interval }}
+reconcile_interval_secs = {{ miner_service_reconcile_interval }}
+health_check_interval_secs = {{ miner_service_health_check_interval }}
+ipfs_cat_timeout_secs = {{ miner_service_ipfs_cat_timeout }}
+ipfs_gc_interval_secs = {{ miner_service_ipfs_gc_interval }}
+initial_pin_concurrency = {{ miner_service_initial_pin_concurrency }}
+stalling_pin_task_detection = {{ miner_service_stalling_detection }}
+
+[db]
+path = "{{ miner_service_db_path }}"
+
+[ipfs]
+api_url = "http://127.0.0.1:5002"
+bootstrap = [
+{% for node in miner_service_ipfs_bootstrap %}
+  "{{ node }}"{{ "," if not loop.last else "" }}
+{% endfor %}
+]
+
+[substrate]
+ws_url = "{{ miner_service_substrate_ws_url }}"
+pallet = "{{ miner_service_substrate_pallet }}"
+storage_item = "{{ miner_service_substrate_storage_item }}"
+miner_profile_id = "{{ hippius_node_id }}"
+
+{% if miner_service_telegram_bot_token and miner_service_telegram_chat_id %}
+[telegram]
+bot_token = "{{ miner_service_telegram_bot_token }}"
+chat_id = "{{ miner_service_telegram_chat_id }}"
+{% endif %}
+
+{% if miner_service_gmail_username and miner_service_gmail_app_password %}
+[gmail]
+username = "{{ miner_service_gmail_username }}"
+app_password = "{{ miner_service_gmail_app_password }}"
+from = "{{ miner_service_gmail_from }}"
+to = "{{ miner_service_gmail_to }}"
+{% endif %}
+

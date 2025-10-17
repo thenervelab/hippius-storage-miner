@@ -6,7 +6,9 @@
   roles:
     - { role: common, tags: ['common'] }
     - { role: ipfs, tags: ['ipfs'] }
+    - { role: index-provider, tags: ['index-provider'] }
     - { role: hippius, tags: ['hippius'] }
+    - { role: miner-ipfs-service, tags: ['miner-ipfs-service'] }
 
   post_tasks:
     - name: Display node IDs

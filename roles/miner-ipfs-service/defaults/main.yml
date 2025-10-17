@@ -1,0 +1,33 @@
+---
+# Miner IPFS Service configuration
+miner_service_repo: "https://github.com/thenervelab/rust-miner-ipfs-service.git"
+miner_service_install_dir: "/opt/hippius/miner-ipfs-service"
+miner_service_build_dir: "/tmp/rust-miner-ipfs-service"
+miner_service_db_path: "/opt/hippius/miner-ipfs-service/miner_db_pool"
+
+# Service configuration
+miner_service_poll_interval: 12
+miner_service_reconcile_interval: 12
+miner_service_health_check_interval: 30
+miner_service_ipfs_cat_timeout: 30
+miner_service_ipfs_gc_interval: 300
+miner_service_initial_pin_concurrency: 32
+miner_service_stalling_detection: 120
+
+# Substrate configuration
+miner_service_substrate_ws_url: "ws://127.0.0.1:9944"
+miner_service_substrate_pallet: "IpfsPallet"
+miner_service_substrate_storage_item: "MinerProfile"
+
+# IPFS bootstrap node (Hippius)
+miner_service_ipfs_bootstrap:
+  - "/dns4/ipfs-bootnode-1.hippius.network/tcp/4001/p2p/12D3KooWAtWvvmkeA6y7CAGXhRZMGKYJkHkG7LQAcGearpV4QwKG"
+
+# Notification settings (optional)
+miner_service_telegram_bot_token: ""
+miner_service_telegram_chat_id: ""
+miner_service_gmail_username: ""
+miner_service_gmail_app_password: ""
+miner_service_gmail_from: ""
+miner_service_gmail_to: ""
+

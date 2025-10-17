@@ -21,21 +21,22 @@ hippius_node_name: "hippius-storage-miner"  # Default node name using hostname
 hippius_telemetry_url: "wss://telemetry.polkadot.io/submit/ 0"  # Telemetry endpoint with verbosity level 0
 
 # IPFS configuration
-ipfs_version: "v0.33.2"
+ipfs_version: "v0.38.1"
 ipfs_user: ipfs
 ipfs_group: ipfs
-ipfs_home: /zfs/ipfs
-ipfs_data_dir: "{{ ipfs_home }}/data"
+ipfs_home: /var/lib/ipfs
+ipfs_data_dir: "{{ ipfs_home }}"
 ipfs_download_url: "{{ kubo_download_base_url }}/{{ ipfs_version }}/kubo_{{ ipfs_version }}_linux-amd64.tar.gz"
-ipfs_api_address: "/ip4/127.0.0.1/tcp/5001"
+ipfs_api_address: "/ip4/127.0.0.1/tcp/5002"
 ipfs_gateway_address: "/ip4/127.0.0.1/tcp/8080"
 
 # ZFS configuration for IPFS
 # The user will need to provide a list of available disks during playbook execution
 # For example: ansible-playbook site.yml -e "zfs_disks=['sdb','sdc']"
 # Leave empty to use a regular directory instead of ZFS
-# zfs_disks: ['sdb','sdc', 'sdd','sde']  # Default to empty list, which disables ZFS setup ['sdb','sdc']
-#zfs_disks: ['sda','sdb']
+# To disable ZFS: comment out the zfs_disks line below or set to empty list []
+# zfs_disks: ['nvme6n1','nvme1n1', 'nvme7n1', 'nvme3n1', 'nvme4n1', 'nvme5n1']
+zfs_disks: []
 # Service configuration
 service_restart_delay: 10
 service_nofile_limit: 65536
@@ -59,10 +60,15 @@ ufw_allowed_ports:
     proto: tcp
   - port: 4001
     proto: udp
+  # Index Provider delegated routing (for cid.contact)
+  - port: 50617
+    proto: tcp
 
 ufw_local_ports:
-  - 5001  # IPFS API
+  - 5001  # HAProxy for IPFS API (proxies to 5002)
+  - 5002  # IPFS API (backend)
   - 8080  # IPFS Gateway
+  - 3102  # Index Provider admin API
 
 # System configuration
 system_packages:
@@ -74,7 +80,12 @@ system_packages:
   - ca-certificates
   - software-properties-common
   - docker-compose
-  - zfsutils-linux  # Added for ZFS support
+  - zfsutils-linux  
+  - libssl-dev 
+  - build-essential 
+  - pkg-config 
+  - python3.12-venv
+  - haproxy
 
 # Docker configuration
 docker_packages:

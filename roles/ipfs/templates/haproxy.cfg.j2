@@ -1,0 +1,29 @@
+# /etc/haproxy/haproxy.cfg
+# HAProxy configuration for IPFS API optimization
+global
+  log /dev/log local0
+  user haproxy
+  group haproxy
+  maxconn 4096
+  daemon
+
+defaults
+  log global
+  mode http
+  option httplog
+  timeout connect 5s
+  timeout client  5m
+  timeout server  5m
+
+frontend ipfs_api_in
+  bind 127.0.0.1:5001
+  acl repo_stat path -i /api/v0/repo/stat
+
+  # For /api/v0/repo/stat, force the fast query (?size-only=true)
+  http-request set-uri /api/v0/repo/stat?size-only=true if repo_stat
+
+  default_backend ipfs_api_out
+
+backend ipfs_api_out
+  server ipfs 127.0.0.1:5002 check
+

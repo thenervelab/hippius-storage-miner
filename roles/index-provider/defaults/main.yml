@@ -1,0 +1,14 @@
+---
+# Index Provider configuration
+index_provider_repo_path: "/root/.index-provider"
+index_provider_listen_multiaddr: "/ip4/0.0.0.0/tcp/50617"
+index_provider_admin_port: 3102
+index_provider_binary_path: "/usr/local/bin/provider"
+
+# HTTP Announce to indexers (optional)
+index_provider_http_announce_urls:
+  - "https://cid.contact/ingest/announce"
+
+# Firewall port for delegated routing
+index_provider_port: 50617
+
